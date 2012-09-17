@@ -1,0 +1,109 @@
+#
+#
+# DAQ_PCAP_SPOOLER v1
+#
+# (c) 2012 Eric Lauzon <beenph@gmail.com>
+#
+#
+# Which came first, the pig or the barn?
+#
+
+#
+# Description
+#
+#
+
+ This DAQ module is simple in it self. Its goal is to read PCAP file in spooled mode.
+ For snort people its like barnyard(X) for snort.
+
+ This will allow you to listen to monitor a directory for specific pcap file and as they grow snort
+ will be able to analyse. The DAQ module also has the ability to archive processed pcap file to a defined directory.
+
+ The DAQ module also create a PSRF (PCAP SPOOLER REFERENCE FILE) think waldo file (for barnyard(x) folks), that will allow
+ snort to resume its processing on halt.
+
+#
+# Compilation
+#
+ extract
+ run ./autogen.sh
+ ./configure --enable-shared
+ make
+ make install OR copy .libs/daq_pcap_spooler.so to your favorite DAQ library directory and enjoy.
+
+#
+# DAQ Variables:
+# 
+
+
+# file_prefix
+#
+# Default: daemonlogger.pcap
+
+  pcap file prefix being watched in the spool directory.
+
+# spool_directory
+#
+# Default: /var/log/snort/log
+
+  Spool monitor directory where pcap file with the file_prefix are located.
+
+
+# archive_directory
+#
+# Default: /var/log/snort/archive
+
+ If enble_archive is enabled, and the DAQ module is done procesing its current pcap file, 
+ and a new file arrive or it start processing a new file, this is the location
+ where the old file will be written.
+
+# block_size_read
+#
+# Default: 128
+
+ The default buffering done by the DAQ module on the pcap file integer * filesystem block size.
+
+# packet_reference_file
+#
+# Default: /var/log/snort/PSRF
+
+ Full path to the file that will be used as a pointe/referencer to continue processing if snort is stoped.
+
+# packet_reference_update_window
+#
+# Default: 50
+
+  The number of processed packet from the current pcap file read before writing to the packet_refence_file
+
+
+# enable_archive
+#
+# Default: 0 (off)
+
+ Enable archiving of processed pcap file (moved to defined archive_directory)
+
+# enable_debug
+#
+# Default: 0 (off)
+ Enable printing of a few usefull information (for debugging)
+	
+#	
+# Snort Usage
+#
+# snort  --daq-dir /usr/local/lib/daq --daq pcap_spooler --daq-var file_prefix=daemonlogger.pcap --daq-var enable_archive=1 --daq-var packet_reference_file=snortXXX_PSRF etc....
+#
+
+
+
+#
+# Todo
+#
+#  Handle signal better (signal context, next version)
+#
+
+#
+# Comments/Bugs/Requests/etc
+#
+# 
+
+  Mail me 
