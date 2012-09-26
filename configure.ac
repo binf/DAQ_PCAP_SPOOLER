@@ -22,6 +22,39 @@ AC_CHECK_DAQ_API
 AC_CHECK_SFBPF
 
 # Checks for other dependencies of your DAQ module go here.
+AC_CHECK_FUNCS([daq_hup_apply] [daq_acquire_with_meta])
+
+
+# Couldn't really find a better way to do this.
+
+AC_DEFUN([AC_CHECK_DAQ_API_VER],
+[
+AC_MSG_CHECKING([DAQ_API_VERSION])
+AC_LINK_IFELSE([
+  AC_LANG_SOURCE(
+  [[
+     #include <daq_api.h>
+     int main()
+     {	  
+     #ifdef DAQ_API_VERSION
+     if(DAQ_API_VERSION == $1)
+           {
+             return 0;
+           }
+     #endif
+	 return 1;
+     }]])],
+	   [
+	   AC_MSG_RESULT([DAQ_API_VERSION installed is ($1) OK ])
+	   ],
+	   [
+	    AC_MSG_RESULT([DAQ_API_VERSION installed is not ($1) ERROR ])
+	    exit 1;
+	   ])
+])
+
+AC_CHECK_DAQ_API_VER([0x00010002])
+
 
 # Large file support
 AC_ARG_ENABLE(largefile,
@@ -37,15 +70,13 @@ else
   AC_CHECK_FUNCS([lseek fstat])
 fi
 
-# Large file support
-
 # Checks for header files.
-AC_CHECK_HEADERS([netinet/in.h stdint.h stdlib.h string.h pcap.h bpf.h daq_api.h sfbpf_dlt.h])
+AC_CHECK_HEADERS([netinet/in.h stdint.h stdlib.h string.h pcap.h bpf.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_SIZE_T
-AC_TYPE_UINT32_T
 AC_TYPE_UINT8_T
+AC_TYPE_UINT32_T
 
 # Checks for library functions.
 AC_FUNC_MALLOC

@@ -67,17 +67,17 @@
 
  The default buffering done by the DAQ module on the pcap file integer * filesystem block size.
 
-# packet_reference_file
+# pcap_reference_file
 #
 # Default: /var/log/snort/PSRF
 
  Full path to the file that will be used as a pointe/referencer to continue processing if snort is stoped.
 
-# packet_reference_update_window
+# packet_update_window
 #
 # Default: 50
 
-  The number of processed packet from the current pcap file read before writing to the packet_refence_file
+  The number of processed packet from the current pcap file read before writing to the pcap_refence_file
 
 
 # enable_archive
@@ -94,7 +94,7 @@
 #	
 # Snort Usage
 #
-# snort  --daq-dir /usr/local/lib/daq --daq pcap_spooler --daq-var file_prefix=daemonlogger.pcap --daq-var enable_archive=1 --daq-var packet_reference_file=snortXXX_PSRF etc....
+# snort  --daq-dir /usr/local/lib/daq --daq pcap_spooler --daq-var file_prefix=daemonlogger.pcap --daq-var enable_archive=1 --daq-var pcap_reference_file=snortXXX_PSRF etc....
 #
 
 #

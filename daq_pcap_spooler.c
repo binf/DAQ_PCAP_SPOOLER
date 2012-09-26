@@ -99,7 +99,7 @@ DAQ_SO_PUBLIC const DAQ_Module_t DAQ_MODULE_DATA =
  **/
 static void pcap_spooler_debug_print(pcap_spooler_context *i_psctx,char *fmt,...)
 {
-    va_list ap = NULL;
+    va_list ap;
     
     if((i_psctx == NULL) ||
        (fmt == NULL))
@@ -522,9 +522,9 @@ static u_int32_t pcap_spooler_default(pcap_spooler_context *i_psctx)
 	}
     }
     
-    if(i_psctx->pcap_reference_update_window == 0)
+    if(i_psctx->pcap_update_window == 0)
     {
-	i_psctx->pcap_reference_update_window = DEFAULT_PCAP_SPOOLER_REFERENCE_UPDATE_WINDOW;
+	i_psctx->pcap_update_window = DEFAULT_PCAP_SPOOLER_UPDATE_WINDOW;
 	
     }
     
@@ -570,17 +570,20 @@ static u_int32_t pcap_spooler_initialize(pcap_spooler_context *i_psctx)
 	tdir = NULL;
     }
     
-    if( (tdir = opendir(i_psctx->archive_directory)) == NULL)
+    if(i_psctx->enable_archive)
     {
-	pcap_spooler_debug_print(i_psctx,(char *)
-				 "\t[%s]: Unable to open [%s] \n",
-                                 __FUNCTION__,
-                                 i_psctx->archive_directory);
-	return 1;
+         if( (tdir = opendir(i_psctx->archive_directory)) == NULL)
+         {
+       	     pcap_spooler_debug_print(i_psctx,(char *)
+			     	      "\t[%s]: Unable to open [%s] \n",
+                                          __FUNCTION__,
+                                         i_psctx->archive_directory);
+	     return 1;
+         }
+   
+         closedir(tdir);
+         tdir = NULL;
     }
-
-    closedir(tdir);
-    tdir = NULL;
     
     /* Open Packt Reference */
     if( pcap_spooler_open_pcap_reference(i_psctx))
@@ -699,9 +702,9 @@ static int pcap_spooler_parse_args(pcap_spooler_context *i_psctx,const DAQ_Confi
             }
 	}
 	
-	if (!strcmp(entry->key, "pcap_reference_update_window"))
+	if (!strcmp(entry->key, "pcap_update_window"))
 	{
-	    if( (i_psctx->pcap_reference_update_window = strtoul(entry->value,NULL,10)) == 0)
+	    if( (i_psctx->pcap_update_window = strtoul(entry->value,NULL,10)) == 0)
 	    {
 		return DAQ_ERROR;
 	    }
@@ -1102,7 +1105,7 @@ static int pcap_spooler_daq_start(void *handle)
 			     i_psctx->archive_directory,
 			     i_psctx->file_prefix,
 			     i_psctx->pcap_reference_file,
-			     i_psctx->pcap_reference_update_window,
+			     i_psctx->pcap_update_window,
 			     i_psctx->bpf_filter_backup ? i_psctx->bpf_filter_backup : "None",
 			     i_psctx->enable_archive,
 			     i_psctx->pcap_reference.spooler_directory,
@@ -1121,7 +1124,7 @@ static int pcap_spooler_daq_start(void *handle)
 }
 
 
-static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback, void *user)
+static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,DAQ_Meta_Func_t metaback, void *user)
 {
     pcap_spooler_context *i_psctx = (pcap_spooler_context *)handle;
 
@@ -1144,7 +1147,12 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
     off_t last_processed_offset = 0;
     
     if( (i_psctx == NULL) ||
+#ifdef HAVE_DAQ_ACQUIRE_WITH_META
+	(callback == NULL) ||
+	(metaback == NULL))
+#else
 	(callback == NULL))
+#endif
     {
 	return 1;
     }
@@ -1220,8 +1228,11 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 		if(packet_filter_eval)
 		{
 		    i_psctx->stats.packets_received++;
-		        
+#ifdef HAVE_DAQ_ACQUIRE_WITH_META
+		    verdict = metaback(user,&hdr,(u_char *)pdata);
+#else
 		    verdict = callback(user,&hdr,(u_char *)pdata);
+#endif		        
 		    /* Is this needed? */
 		    if (verdict >= MAX_DAQ_VERDICT)
 			verdict = DAQ_VERDICT_PASS;
@@ -1231,7 +1242,7 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 		
 		i_psctx->read_packet++;
 		
-		if(i_psctx->read_packet == i_psctx->pcap_reference_update_window)
+		if(i_psctx->read_packet == i_psctx->pcap_update_window)
 		{
 		    i_psctx->pcap_reference.last_read_offset += off_read;
 		        
@@ -1301,7 +1312,7 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 	}
 	else if( ((i_psctx->pcap_stat.st_size > i_psctx->pcap_reference.saved_size) ||
 		  (i_psctx->pcap_stat.st_size > i_psctx->pcap_reference.last_read_offset)) &&
-		 (i_psctx->read_packet == i_psctx->pcap_reference_update_window))
+		 (i_psctx->read_packet == i_psctx->pcap_update_window))
 	{
 	    i_psctx->read_packet=0;
 	    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;

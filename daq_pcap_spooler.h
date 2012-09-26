@@ -42,7 +42,7 @@
 #define DEFAULT_PCAP_SPOOLER_SPOOL_DIRECTORY "/var/log/snort/log"
 #define DEFAULT_PCAP_SPOOLER_ARCHIVE_DIRECTORY "/var/log/snort/archive"
 #define DEFAULT_PCAP_SPOOLER_REFERENCE_FILE "/var/log/snort/PSRF"
-#define DEFAULT_PCAP_SPOOLER_REFERENCE_UPDATE_WINDOW 50
+#define DEFAULT_PCAP_SPOOLER_UPDATE_WINDOW 50
 
 
 typedef struct _PcapReference
@@ -68,7 +68,7 @@ typedef struct _pcap_spooler_context
     char *spooler_directory;
     char *archive_directory;
     char *pcap_reference_file;
-    u_int32_t pcap_reference_update_window;
+    u_int32_t pcap_update_window;
     /* Configuration Parameters */
     
     /* Contextual information */
@@ -122,7 +122,7 @@ static int pcap_spooler_daq_set_filter(void *handle, const char *filter);
 static int pcap_spooler_daq_get_stats(void *handle, DAQ_Stats_t * stats);
 static void pcap_spooler_daq_reset_stats(void *handle);
 static int pcap_spooler_daq_start(void *handle);
-static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback, void *user);
+static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,DAQ_Meta_Func_t metaback, void *user);
 static int pcap_spooler_daq_breakloop(void *handle);
 static int pcap_spooler_daq_stop(void *handle);
 static void pcap_spooler_daq_shutdown(void *handle);
