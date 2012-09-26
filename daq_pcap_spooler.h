@@ -31,7 +31,7 @@
 /* Should we support other type of pcap out there ? */
 #define TCPDUMP_MAGIC 0xa1b2c3d4
 
-#define DAQ_PCAP_SPOOLER_VERSION 1
+#define DAQ_PCAP_SPOOLER_VERSION 2
 
 #define DAQ_PCAP_SPOOLER_CAPABILITIES  (DAQ_CAPA_UNPRIV_START|DAQ_CAPA_BPF|DAQ_CAPA_BREAKLOOP);
 
@@ -132,7 +132,6 @@ static const char *pcap_spooler_daq_get_errbuf(void *handle);
 static void pcap_spooler_daq_set_errbuf(void *handle, const char *string);
 static uint32_t pcap_spooler_daq_get_capabilities(void *handle);
 static int pcap_spooler_daq_get_datalink_type(void *handle);
-static void pcap_spooler_print_config(pcap_spooler_context *i_psctx);
 /**
  **
  ** DAQ FUNCTIONS PROTOTYPES
@@ -146,6 +145,7 @@ static void pcap_spooler_print_config(pcap_spooler_context *i_psctx);
  ** PCAP SPOOLER FUNCTIONS PROTOTYPES
  **
  **/
+static void pcap_spooler_debug_print(pcap_spooler_context *i_psctx,char *fmt,...);
 static u_int32_t pcap_spooler_read_bulk(int fd,void *buffer, ssize_t read_size,ssize_t *r_read_size);
 static u_int32_t pcap_spooler_write_pcap_reference(pcap_spooler_context *i_psctx);
 static u_int32_t pcap_spooler_get_stat(int fd,struct stat *pr_stat);

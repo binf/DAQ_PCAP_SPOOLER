@@ -1,6 +1,6 @@
 #
 #
-# DAQ_PCAP_SPOOLER v1
+# DAQ_PCAP_SPOOLER v2
 #
 # (c) 2012 Eric Lauzon <beenph@gmail.com>
 #
@@ -16,10 +16,12 @@
  This DAQ module is simple in it self. Its goal is to read PCAP file in spooled mode.
  For snort people its like barnyard(X) for snort.
 
- This will allow you to listen to monitor a directory for specific pcap file and as they grow snort
- will be able to analyse. The DAQ module also has the ability to archive processed pcap file to a defined directory.
+ This DAQ module monitor a directory for specific prefixed pcap file and as they grow, new packets are sent to snort 
+ for analysis without loosing detection context. 
 
- The DAQ module also create a PSRF (PCAP SPOOLER REFERENCE FILE) think waldo file (for barnyard(x) folks), that will allow
+ The module also has the ability to archive processed pcap file to a defined directory.
+
+ The module create a PSRF (PCAP SPOOLER REFERENCE FILE) think waldo file (for barnyard(x) folks), that will allow
  snort to resume its processing on halt.
 
 #
@@ -30,6 +32,8 @@
  ./configure --enable-shared
  make
  make install OR copy .libs/daq_pcap_spooler.so to your favorite DAQ library directory and enjoy.
+
+ You can configure the module with --enable-largefile to support >2GB capture files.
 
 #
 # DAQ Variables:
@@ -93,16 +97,8 @@
 # snort  --daq-dir /usr/local/lib/daq --daq pcap_spooler --daq-var file_prefix=daemonlogger.pcap --daq-var enable_archive=1 --daq-var packet_reference_file=snortXXX_PSRF etc....
 #
 
-
-
 #
-# Todo
-#
-#  Handle signal better (signal context, next version)
-#
-
-#
-# Comments/Bugs/Requests/etc
+# TODO/Comments/Bugs/Requests/etc
 #
 # 
 

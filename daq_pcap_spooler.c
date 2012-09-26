@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pcap.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,7 +97,38 @@ DAQ_SO_PUBLIC const DAQ_Module_t DAQ_MODULE_DATA =
  ** PCAP SPOOLER FUNCTIONS
  **
  **/
+static void pcap_spooler_debug_print(pcap_spooler_context *i_psctx,char *fmt,...)
+{
+    va_list ap = NULL;
+    
+    if((i_psctx == NULL) ||
+       (fmt == NULL))
+    {
+	return;
+    }
+    
+    if(i_psctx->enable_debug)
+    {
+	printf("===============================================\n"
+               "[DAQ] <++> [%s] Debug Message \n"
+	       "===============================================\n",
+#ifdef BUILDING_SO
+               DAQ_MODULE_DATA.name
+#else
+               pcap_spooler_daq_module_data.name
+#endif
+	    );
+	
+	va_start(ap, fmt);
+	vprintf(fmt,ap);
+	va_end(ap);
+	
+	printf("===============================================\n");
 
+    }
+    
+    return;
+}
 
 static u_int32_t pcap_spooler_read_bulk(int fd,void *buffer, ssize_t read_size,ssize_t *r_read_size)
 {
@@ -110,6 +142,7 @@ static u_int32_t pcap_spooler_read_bulk(int fd,void *buffer, ssize_t read_size,s
     
     if( (*r_read_size=read(fd,buffer,read_size)) <=0)
     {
+	perror("read()");
 	return 1;
     }
     
@@ -132,8 +165,37 @@ static u_int32_t pcap_spooler_write_pcap_reference(pcap_spooler_context *i_psctx
     
     if( write(i_psctx->packet_reference_fd,&i_psctx->pcap_reference,sizeof(PcapReference)) != sizeof(PcapReference))
     {
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tError writing to [%s]\n",
+				 i_psctx->pcap_reference_file);
 	return 1;
     }
+
+    pcap_spooler_debug_print(i_psctx,(char *)
+			     "\tWriting information to [%s] \n"
+			     "\t--------------\n"
+			     "\tPSRF Spooler Directory  -> [%s] \n"
+			     "\tPSRF Archive Direcotory -> [%s] \n"
+			     "\tPSRF File Prefix -> [%s] \n"
+			     "\tPSRF timestamp -> [%u] \n"
+#ifdef LARGEFILE_SUPPORT
+			     "\tPSRF last read offset -> [%llu] \n"
+#else
+			     "\tPSRF last read offset -> [%u] \n"
+#endif
+			     "\tPSRF saved size -> [%u] \n"
+			     "\t--------------\n\n",
+			     i_psctx->pcap_reference_file,
+			     i_psctx->pcap_reference.spooler_directory,
+			     i_psctx->pcap_reference.archive_directory,
+			     i_psctx->pcap_reference.file_prefix,
+			     i_psctx->pcap_reference.timestamp,
+#ifdef LARGEFILE_SUPPORT
+			     (u_int64_t)i_psctx->pcap_reference.last_read_offset,
+#else
+			     (u_int32_t)i_psctx->pcap_reference.last_read_offset,
+#endif
+			     (u_int32_t)i_psctx->pcap_reference.saved_size);
     
     return 0;
 }
@@ -163,32 +225,34 @@ static u_int32_t pcap_spooler_get_header(pcap_spooler_context *i_psctx)
     
     if( (i_psctx == NULL) ||
 	(i_psctx->pcap_fd <= 0))
-	{
-	    return 1;
-	}
-	
-	memset(&pfh,'\0',sizeof(struct pcap_file_header));
-
-	if(pcap_spooler_read_bulk(i_psctx->pcap_fd,&pfh,sizeof(struct pcap_file_header),&read_size))
-	{
-	    return 1;
-	}
-	       
-	if( read_size < (ssize_t)(sizeof(struct pcap_file_header)))
-	{
-	    return 1;
-	}
-
-	if(pfh.magic != TCPDUMP_MAGIC)
-	{
-	    return 1;
-	}
-	
-	i_psctx->snaplen = pfh.snaplen;
-	i_psctx->data_link_type = pfh.linktype;
-	
-
-	return 0;
+    {
+	return 1;
+    }
+    
+    memset(&pfh,'\0',sizeof(struct pcap_file_header));
+    
+    if(pcap_spooler_read_bulk(i_psctx->pcap_fd,&pfh,sizeof(struct pcap_file_header),&read_size))
+    {
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tError reading from [%s]\n",
+				 i_psctx->pcap_file_temp_name);
+	return 1;
+    }
+    
+    if( (read_size < (ssize_t)(sizeof(struct pcap_file_header))) ||
+	(pfh.magic != TCPDUMP_MAGIC))
+    {
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tInvalid PCAP header for file [%s]\n",
+				 i_psctx->pcap_file_temp_name);
+	return 1;
+    }
+    
+    i_psctx->snaplen = pfh.snaplen;
+    i_psctx->data_link_type = pfh.linktype;
+    
+    
+    return 0;
 }
 
 static u_int32_t pcap_spooler_close_pcap(pcap_spooler_context *i_psctx)
@@ -197,11 +261,13 @@ static u_int32_t pcap_spooler_close_pcap(pcap_spooler_context *i_psctx)
     {
 	return 1;
     }
-
+    
     if(i_psctx->pcap_fd)
     {
 	close(i_psctx->pcap_fd);
     }
+    
+    i_psctx->pcap_fd=0;
     
     i_psctx->has_PCAP = 0;
     
@@ -222,14 +288,32 @@ static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
 	     i_psctx->pcap_reference.file_prefix,
 	     i_psctx->pcap_reference.timestamp);
     
+    pcap_spooler_debug_print(i_psctx,(char *)
+			     "\tOpening [%s] \n",
+			     i_psctx->pcap_file_temp_name);
+    
     if( (i_psctx->pcap_fd = open(i_psctx->pcap_file_temp_name,O_RDONLY)) <=0)
     {
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tError opening file [%s]\n",
+				 i_psctx->pcap_file_temp_name);
 	return 1;
     }
     
-
+    /* Make sure the file has some data,force the kernel. */
+    if( fsync(i_psctx->pcap_fd))
+    {
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tError calling fsync() on [%s]\n",
+				 i_psctx->pcap_file_temp_name);
+	return 1;
+    }
+    
     if( pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat))
     {
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tError calling fstat on [%s]\n",
+				 i_psctx->pcap_file_temp_name);
 	return 1;
     }
     
@@ -239,6 +323,9 @@ static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
     {
 	if( (i_psctx->read_buffer=calloc(i_psctx->pcap_stat.st_blksize,i_psctx->block_size_read)) == NULL)
 	{
+	    pcap_spooler_debug_print(i_psctx,(char *)
+                                     "\tError reading from [%s]\n",
+                                     i_psctx->pcap_file_temp_name);
 	    return 1;
 	}
 	
@@ -249,12 +336,20 @@ static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
 	memset(i_psctx->read_buffer,'\0',i_psctx->read_buffer_size);
     }
     
+    /* Shouldn't be needed but just in case */
+    if(lseek(i_psctx->pcap_fd,0,SEEK_SET) != 0)
+    {
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tError calling lseek() on  [%s]\n",
+				 i_psctx->pcap_file_temp_name);
+	return 1;
+    }
+    
     if( pcap_spooler_get_header(i_psctx))
     {
 	return 1;
     }
     
-
     if(i_psctx->bpf_recompile_filter)
     {
 	if( pcap_spooler_daq_set_filter((void *)i_psctx,i_psctx->bpf_filter_backup))
@@ -262,9 +357,9 @@ static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
 	    return 1;
 	}
     }
-
+    
     i_psctx->has_PCAP = 1;
-
+    
     return 0;
 }
 
@@ -282,19 +377,31 @@ static u_int32_t pcap_spooler_open_pcap_reference(pcap_spooler_context *i_psctx)
     
     if( (tfd = open(i_psctx->pcap_reference_file,O_RDWR)) < 0)
     {
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tError opening [%s]\n",
+				 i_psctx->pcap_reference_file);
 	return 1;
     }
     else
     {
 	if( pcap_spooler_read_bulk(tfd,&i_psctx->pcap_reference,sizeof(PcapReference),(ssize_t *)&read_len))
 	{
+	    pcap_spooler_debug_print(i_psctx,(char *)
+				     "\tError reading [%s]\n",
+				     i_psctx->pcap_reference_file);
 	    return 1;
 	}
 	
-	if( read_len < sizeof(PcapReference))
+	if( (read_len < sizeof(PcapReference)) ||
+	    (read_len > sizeof(PcapReference)))
 	{
 	    close(tfd);
 	    tfd =0;
+	    pcap_spooler_debug_print(i_psctx,(char *)
+                                     "\tError reading [%s], invalid read size [%u] should be [%u]\n",
+                                     i_psctx->pcap_reference_file,
+				     read_len,
+				     sizeof(PcapReference));
 	    return 1;
 	}
 	
@@ -316,13 +423,12 @@ static u_int32_t pcap_spooler_create_pcap_reference(pcap_spooler_context *i_psct
     
     if( (i_psctx->packet_reference_fd = open(i_psctx->pcap_reference_file,O_CREAT|O_RDWR,S_IRUSR|S_IWUSR)) < 0)
     {
-        DPE(i_psctx->errbuf, "[%s]: Unable to create [%s]\n",
-            __FUNCTION__,
-            i_psctx->pcap_reference_file);
-	
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tUnable to create [%s]\n",
+				 i_psctx->pcap_reference_file);
         return 1;
     }
-
+    
     /* Initialize PR */
     memset(&i_psctx->pcap_reference,'\0',sizeof(PcapReference));
     
@@ -334,9 +440,9 @@ static u_int32_t pcap_spooler_create_pcap_reference(pcap_spooler_context *i_psct
     
     if( (pcap_spooler_write_pcap_reference(i_psctx)))
     {
-	DPE(i_psctx->errbuf, "[%s]: Unable to write to [%s]\n",
-            __FUNCTION__,
-            i_psctx->pcap_reference_file);
+	pcap_spooler_debug_print(i_psctx,(char *)
+                                 "\tUnable to write [%s]\n",
+                                 i_psctx->pcap_reference_file);
 	return 1;
     }
     
@@ -356,33 +462,16 @@ static u_int32_t pcap_spooler_compare_pcap_reference(pcap_spooler_context *i_psc
 	(strncmp(i_psctx->pcap_reference.spooler_directory,i_psctx->spooler_directory,PATH_MAX) !=0 ) &&
 	(strncmp(i_psctx->pcap_reference.archive_directory,i_psctx->archive_directory,PATH_MAX) !=0 ))
     {
-	
-	if(i_psctx->enable_debug)
-	{
-	    printf("\t--------------\n"
-		   "\tDAQ : [%s] \n"
-		   "\t--------------\n\n"
-		   "\tERROR: [information from pcap spooler reference file does not match the defined variables] \n"
-		   "\t--------------\n\n"
-		   "\tPSRF Spooler Directory  -> [%s] | DAQ Variable [%s] \n"
-		   "\tPSRF Archive Direcotory -> [%s] | DAQ Variable [%s]\n"
-		   "\tPSRF File Prefix -> [%s] | DAQ Variable [%s] \n",
-#ifdef BUILDING_SO
-		   DAQ_MODULE_DATA.name,
-#else
-		   pcap_spooler_daq_module_data.name,
-#endif
-		   i_psctx->pcap_reference.spooler_directory,i_psctx->spooler_directory,
-		   i_psctx->pcap_reference.archive_directory,i_psctx->archive_directory,
-		   i_psctx->pcap_reference.file_prefix,i_psctx->file_prefix);
-	}
-	
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tERROR: [information from pcap spooler reference file does not match the defined variables] \n"
+				 "\t--------------\n\n"
+				 "\tPSRF Spooler Directory  -> [%s] | DAQ Variable [%s] \n"
+				 "\tPSRF Archive Direcotory -> [%s] | DAQ Variable [%s]\n"
+				 "\tPSRF File Prefix -> [%s] | DAQ Variable [%s] \n",
+				 i_psctx->pcap_reference.spooler_directory,i_psctx->spooler_directory,
+				 i_psctx->pcap_reference.archive_directory,i_psctx->archive_directory,
+				 i_psctx->pcap_reference.file_prefix,i_psctx->file_prefix);
 	return 1;
-    }
-    
-    if(i_psctx->enable_debug)
-    {
-
     }
     
     return 0;
@@ -441,14 +530,8 @@ static u_int32_t pcap_spooler_default(pcap_spooler_context *i_psctx)
     
     if(i_psctx->enable_archive == 0)
     {
-	if(i_psctx->enable_debug)
-	{
-#ifdef BUILDING_SO
-	    printf("\tDAQ [%s]: Archive mode disabled \n",DAQ_MODULE_DATA.name);
-#else
-	    printf("\tDAQ [%s]: Archive mode disabled \n", pcap_spooler_daq_module_data.name);
-#endif
-	}
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\tArchive mode disabled \n");
     }
     
     if(i_psctx->block_size_read == 0)
@@ -471,13 +554,14 @@ static u_int32_t pcap_spooler_initialize(pcap_spooler_context *i_psctx)
 	return 1;
     }
     
+    
     /* Check if we can access everything */
     if( (tdir = opendir(i_psctx->spooler_directory)) == NULL)
     {
-	DPE(i_psctx->errbuf, "[%s]: Unable to open [%s]\n",
-	    __FUNCTION__,
-	    i_psctx->spooler_directory);
-	
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\t[%s]: Unable to open [%s] \n",
+				 __FUNCTION__,
+				 i_psctx->spooler_directory);
 	return 1;
     }
     else
@@ -488,21 +572,25 @@ static u_int32_t pcap_spooler_initialize(pcap_spooler_context *i_psctx)
     
     if( (tdir = opendir(i_psctx->archive_directory)) == NULL)
     {
-	DPE(i_psctx->errbuf, "[%s]: Unable to open [%s]\n",
-	    __FUNCTION__,
-	    i_psctx->archive_directory);
-	
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "\t[%s]: Unable to open [%s] \n",
+                                 __FUNCTION__,
+                                 i_psctx->archive_directory);
 	return 1;
     }
 
     closedir(tdir);
     tdir = NULL;
-
+    
     /* Open Packt Reference */
     if( pcap_spooler_open_pcap_reference(i_psctx))
     {
 	if( (pcap_spooler_create_pcap_reference(i_psctx)))
 	{
+	    pcap_spooler_debug_print(i_psctx,(char *)
+				     "\t[%s]: Unable to create [%s] \n",
+				     __FUNCTION__,
+				     i_psctx->pcap_reference_file);
 	    return 1;
 	}
     }
@@ -514,79 +602,18 @@ static u_int32_t pcap_spooler_initialize(pcap_spooler_context *i_psctx)
 	}
 	
 	/* We are already have a file lets see */
-	
 	if( i_psctx->pcap_reference.timestamp !=0 )
 	{
 	    if(pcap_spooler_open_pcap(i_psctx))
 	    {
 		return 1;
 	    }
-	    
-	    printf("done ! \n");
 	}
 	
     }
 
     i_psctx->state=DAQ_STATE_INITIALIZED;    
     return 0;
-}
-
-
-static void pcap_spooler_print_config(pcap_spooler_context *i_psctx)
-{
-    if(i_psctx == NULL)
-    {
-	return;
-    }
- 
-    if(i_psctx->enable_debug)
-    {
-	printf("===============================================\n"
-	       "[DAQ] <++> [%s] \n"
-	       "[DEBUG Config print]\n"
-	       "===============================================\n\n"
-	       "\t[Information from DAQ Variables]\n"
-	       "\t--------------\n"
-	       "\t Spooler Directory  -> [%s]\n"
-	       "\t Archive Direcotory -> [%s]\n"
-	       "\t File Prefix -> [%s]\n"
-	       "\t PCAP Spooler Reference File -> [%s]\n"
-	       "\t PCAP Spooler Reference Window [%u]\n"
-	       "\t BFP Filter [%s]\n"
-	       "\t Enable Archive [%u]\n"
-	       "\t--------------\n\n"
-	       "\t--------------\n"
-	       "\t[Information from PCAP spooler reference file] \n"
-	       "\t--------------\n"
-	       "\tSpooler Directory  -> [%s] \n"
-	       "\tArchive Directory -> [%s] \n"
-	       "\tFile Prefix -> [%s] \n"
-	       "\tProcessing Timestamp -> [%u] \n"
-	       "\tLast read offset -> [%u] \n"
-	       "\tLast saved spool file size-> [%u] \n"
-	       "\t--------------\n"
-	       "===============================================\n\n",
-#ifdef BUILDING_SO
-	       DAQ_MODULE_DATA.name,
-#else
-	       pcap_spooler_daq_module_data.name,
-#endif
-	       i_psctx->spooler_directory,
-	       i_psctx->archive_directory,
-	       i_psctx->file_prefix,
-	       i_psctx->pcap_reference_file,
-	       i_psctx->pcap_reference_update_window,
-	       i_psctx->bpf_filter_backup ? i_psctx->bpf_filter_backup : "None",
-	       i_psctx->enable_archive,
-	       i_psctx->pcap_reference.spooler_directory,
-	       i_psctx->pcap_reference.archive_directory,
-	       i_psctx->pcap_reference.file_prefix,
-	       i_psctx->pcap_reference.timestamp,
-	       (u_int32_t)i_psctx->pcap_reference.last_read_offset,
-	       (u_int32_t)i_psctx->pcap_reference.saved_size);
-    }
-    
-    return;
 }
 
 
@@ -750,25 +777,10 @@ static u_int32_t pcap_spooler_move_pcap(pcap_spooler_context *i_psctx)
 	return 1;
     }
     
-
-    if(i_psctx->enable_debug)
-    {
-	
-	printf("================\n"
-	       "[DAQ] <++> [%s] \n"
-	       "================\n"
-	       "Moving file [%s] to [%s] \n"
-	       "================\n\n",
-#ifdef BUILDING_SO
-               DAQ_MODULE_DATA.name,
-#else
-               pcap_spooler_daq_module_data.name,
-#endif
-	       old_path,new_path);
-
-	
-    }
-
+    pcap_spooler_debug_print(i_psctx,(char *)
+			     "\tMoving file [%s] to [%s] \n",
+			     old_path,new_path);
+    
     if( rename(old_path,new_path) <0)
     {
 	return 1;
@@ -864,79 +876,55 @@ static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx)
 	}
     }
     
-    
     if(min_stamp > i_psctx->pcap_reference.timestamp)
     {
+	
 	if( (i_psctx->has_PCAP) &&
 	    (i_psctx->read_full))
 	{
+	    i_psctx->read_full = 0;
+	    
 	    if(i_psctx->enable_archive)
 	    {
 		if(pcap_spooler_move_pcap(i_psctx))
 		{
 		    return 1;
 		}
-		
-		if( pcap_spooler_close_pcap(i_psctx))
-		{
-		    return 1;
-		}
 	    }
-
-	    i_psctx->pcap_reference.timestamp = min_stamp;
 	    
-	    if( pcap_spooler_open_pcap(i_psctx))
-            {
-                return 1;
-            }
-	    
-	    if( pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat))
+	    if( pcap_spooler_close_pcap(i_psctx))
 	    {
 		return 1;
 	    }
-	    
-	    i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
-	    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
-	    
-	    if( (pcap_spooler_write_pcap_reference(i_psctx)))
-	    {
-		/* XXX */
-		return 1;
-	    }
-
-	    
 	}
-	else
+	
+	i_psctx->pcap_reference.timestamp = min_stamp;
+	
+	/* We are opening a new file, make sure that even if we would crash and write the PSRF that the PSRF is re-initialized */
+	i_psctx->pcap_reference.last_read_offset = 0;
+	i_psctx->pcap_reference.saved_size = 0;
+	
+	if( pcap_spooler_open_pcap(i_psctx))
 	{
-
-	    i_psctx->pcap_reference.timestamp = min_stamp;
-	    
-	    if( pcap_spooler_open_pcap(i_psctx))
-	    {
-		return 1;
-	    }
-	    
-	    if( pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat))
-	    {
-		return 1;
-	    }
-	    	    
-	    i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
-	    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
-
-
-	    if( (pcap_spooler_write_pcap_reference(i_psctx)))
-	    {
-		/* XXX */
-		return 1;
-	    }
-
+	    return 1;
+	}
+	
+	if( pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat))
+	{
+	    return 1;
+	}
+	
+	i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
+	i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
+	
+	if( (pcap_spooler_write_pcap_reference(i_psctx)))
+	{
+	    return 1;
 	}
     }
     else
     {
 	/* in case its stalling for some reason */
-	i_psctx->read_full = 0;
 	usleep(200);
     }
     
@@ -1011,6 +999,9 @@ static int pcap_spooler_daq_set_filter(void *handle, const char *filter)
 	
 	if( sfbpf_compile(i_psctx->snaplen,i_psctx->data_link_type,&i_psctx->bpf_filter,filter,1,defaultnet) < 0)
 	{
+            pcap_spooler_debug_print(i_psctx,(char *)
+				     "\tError compiling BFP filter [%s]\n",
+				     filter);
 	    return DAQ_ERROR;
 	}
 	
@@ -1025,6 +1016,9 @@ static int pcap_spooler_daq_set_filter(void *handle, const char *filter)
 	    
 	    if( (i_psctx->bpf_filter_backup = strndup(filter,strlen(filter))) == NULL)
 	    {
+		pcap_spooler_debug_print(i_psctx,(char *)
+					 "\tError duplicating BFP filter string [%s]\n",
+					 filter);
 		return DAQ_ERROR;
 	    }
 	    
@@ -1032,6 +1026,9 @@ static int pcap_spooler_daq_set_filter(void *handle, const char *filter)
 	
 	if( sfbpf_compile(i_psctx->snaplen,i_psctx->data_link_type,&i_psctx->bpf_filter,filter,1,defaultnet) < 0)
 	{
+            pcap_spooler_debug_print(i_psctx,(char *)
+				     "\tError compiling BFP filter [%s]\n",
+				     filter);
 	    return DAQ_ERROR;
 	}
     }
@@ -1074,9 +1071,50 @@ static int pcap_spooler_daq_start(void *handle)
     pcap_spooler_daq_reset_stats(i_psctx);
     
     i_psctx->state = DAQ_STATE_STARTED;
-
-    pcap_spooler_print_config(i_psctx);
     
+    pcap_spooler_debug_print(i_psctx,(char *)
+			     "\t--------------\n"
+			     "\t[Information from DAQ Variables]\n"
+			     "\t--------------\n"
+			     "\t Spooler Directory  -> [%s]\n"
+			     "\t Archive Direcotory -> [%s]\n"
+			     "\t File Prefix -> [%s]\n"
+			     "\t PCAP Spooler Reference File -> [%s]\n"
+			     "\t PCAP Spooler Reference Window [%u]\n"
+			     "\t BFP Filter [%s]\n"
+			     "\t Enable Archive [%u]\n"
+			     "\t--------------\n\n"
+			     "\t--------------\n"
+			     "\t[Information from PCAP spooler reference file] \n"
+			     "\t--------------\n"
+			     "\tSpooler Directory -> [%s] \n"
+			     "\tArchive Directory -> [%s] \n"
+			     "\tFile Prefix -> [%s] \n"
+			     "\tProcessing Timestamp -> [%u] \n"
+#ifdef LARGEFILE_SUPPORT
+			     "\tLast read offset -> [%llu] \n"
+#else
+			     "\tLast read offset -> [%u] \n"
+#endif
+			     "\tLast saved spool file size-> [%u] \n"
+			     "\t--------------\n",
+			     i_psctx->spooler_directory,
+			     i_psctx->archive_directory,
+			     i_psctx->file_prefix,
+			     i_psctx->pcap_reference_file,
+			     i_psctx->pcap_reference_update_window,
+			     i_psctx->bpf_filter_backup ? i_psctx->bpf_filter_backup : "None",
+			     i_psctx->enable_archive,
+			     i_psctx->pcap_reference.spooler_directory,
+			     i_psctx->pcap_reference.archive_directory,
+			     i_psctx->pcap_reference.file_prefix,
+			     i_psctx->pcap_reference.timestamp,
+#ifdef LARGEFILE_SUPPORT
+			     (u_int64_t)i_psctx->pcap_reference.last_read_offset,
+#else
+			     (u_int32_t)i_psctx->pcap_reference.last_read_offset,
+#endif
+			     (u_int32_t)i_psctx->pcap_reference.saved_size);
     
     return DAQ_SUCCESS;
 
@@ -1130,18 +1168,16 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 	}
 	
 	while(current_offset < total_size)
-	{	    
-	    
+	{    
 	    if(pcap_spooler_read_bulk(i_psctx->pcap_fd,(void *)i_psctx->read_buffer,i_psctx->read_buffer_size,&read_size))
 	    {
 		return 1;
 	    }
 	    
 	    current_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
-	    
 	    process_offset = 0;
 	    off_read = 0;
-	    
+
 	    while(process_offset < read_size)
 	    {
 		packet_filter_eval = 1;
@@ -1160,7 +1196,7 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 		}
 		
 		process_offset+=sizeof(struct pcap_pkthdr);
-	    	
+		
 		pdata = (char *)(i_psctx->read_buffer+process_offset);
 		
 		process_offset+=pkthdrptr->caplen;
@@ -1184,12 +1220,12 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 		if(packet_filter_eval)
 		{
 		    i_psctx->stats.packets_received++;
-		    
+		        
 		    verdict = callback(user,&hdr,(u_char *)pdata);
 		    /* Is this needed? */
 		    if (verdict >= MAX_DAQ_VERDICT)
 			verdict = DAQ_VERDICT_PASS;
-		    
+		        
 		    i_psctx->stats.verdicts[verdict]++;
 		}
 		
@@ -1198,40 +1234,41 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 		if(i_psctx->read_packet == i_psctx->pcap_reference_update_window)
 		{
 		    i_psctx->pcap_reference.last_read_offset += off_read;
-		    
+		        
 		    if( (pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat)))
 		    {
 			return 1;
 		    }
-		    
+		        
 		    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
-		    
+		        
 		    if( (pcap_spooler_write_pcap_reference(i_psctx)))
 		    {
 			return 1;
 		    }
-		    
+		        
 		    i_psctx->read_packet = 0;
 		    off_read = 0;
 		}
 	    }
-	    
+	        
 	    if(pcap_rebuffer)
 	    {
 		pcap_rebuffer=0;
 		
-		if( (i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,(current_offset - (read_size - process_offset)),SEEK_SET)) < 0)
-		{
-		    return 1;
-		}
-		
 		last_processed_offset = current_offset - (read_size -  process_offset);
 		
-		if( (pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat)))
+		if( (i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,last_processed_offset,SEEK_SET)) < 0)
 		{
 		    return 1;
 		}
 		
+		if( (pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat)))
+		{
+		    return 1;
+		}
+		
+		i_psctx->pcap_reference.last_read_offset = last_processed_offset;
 		i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
 		
 		
@@ -1246,27 +1283,34 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 	    }
 	    
 	    memset(i_psctx->read_buffer,'\0',i_psctx->read_buffer_size);
-	    
 	}
     }
     
-    if( (i_psctx->has_PCAP) && 
-	(total_size == current_offset))
+    
+    if( (i_psctx->has_PCAP)) 
     {
-	i_psctx->read_full = 1;
-	i_psctx->pcap_reference.last_read_offset = total_size;
-	
 	if( (pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat)))
 	{
 	    return 1;
 	}
 
-	i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
-	
-	if( (pcap_spooler_write_pcap_reference(i_psctx)))
+	if(total_size == current_offset)
 	{
-	    /* XXX */
-	    return 1;
+	    i_psctx->read_full = 1;
+	    i_psctx->pcap_reference.last_read_offset = total_size;
+	}
+	else if( ((i_psctx->pcap_stat.st_size > i_psctx->pcap_reference.saved_size) ||
+		  (i_psctx->pcap_stat.st_size > i_psctx->pcap_reference.last_read_offset)) &&
+		 (i_psctx->read_packet == i_psctx->pcap_reference_update_window))
+	{
+	    i_psctx->read_packet=0;
+	    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
+	    
+	    if( (pcap_spooler_write_pcap_reference(i_psctx)))
+	    {
+		/* XXX */
+		return 1;
+	    }
 	}
     }
     
@@ -1279,22 +1323,46 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 }
 
 
-/* Call stop */
 static int pcap_spooler_daq_breakloop(void *handle)
 {
-    return pcap_spooler_daq_stop(handle);
-}
-
-/* Same as shutdown but return error code.. **currently***/
-static int pcap_spooler_daq_stop(void *handle)
-{
     pcap_spooler_context *i_psctx = (pcap_spooler_context *)handle;
-    
-    if(pcap_spooler_write_pcap_reference(i_psctx))
+
+    if(i_psctx == NULL)
     {
 	return DAQ_ERROR;
     }
     
+    if( (pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat)))
+    {
+	return DAQ_ERROR;
+    }
+    
+    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
+    
+    if( (pcap_spooler_write_pcap_reference(i_psctx)))
+    {
+	return DAQ_ERROR;
+    }
+    
+    return DAQ_SUCCESS;
+}
+
+static int pcap_spooler_daq_stop(void *handle)
+{
+    pcap_spooler_context *i_psctx = (pcap_spooler_context *)handle;
+
+    if( (pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat)))
+    {
+	return DAQ_ERROR;
+    }
+
+    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
+    
+    if( (pcap_spooler_write_pcap_reference(i_psctx)))
+    {
+	return DAQ_ERROR;
+    }
+
     if(i_psctx->bpf_recompile_filter)
     {
         sfbpf_freecode(&i_psctx->bpf_filter);
@@ -1323,27 +1391,32 @@ static int pcap_spooler_daq_stop(void *handle)
 	free(i_psctx->read_buffer);
 	i_psctx->read_buffer = NULL;
     }
-
-    /* Will snort get mad over this ...*/
+    
     if(i_psctx != NULL)
     {
 	free(i_psctx);
     }
 
-    /* FOR NOW */
-    return DAQ_ERROR;
+    return DAQ_SUCCESS;
 }
 
 
 static void pcap_spooler_daq_shutdown(void *handle)
 {
     pcap_spooler_context *i_psctx = (pcap_spooler_context *)handle;
-    
-    if(pcap_spooler_write_pcap_reference(i_psctx))
+
+    if( (pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat)))
     {
 	return;
     }
     
+    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
+
+    if( (pcap_spooler_write_pcap_reference(i_psctx)))
+    {
+	return;
+    }
+
     if(i_psctx->bpf_recompile_filter)
     {
         sfbpf_freecode(&i_psctx->bpf_filter);
@@ -1373,7 +1446,6 @@ static void pcap_spooler_daq_shutdown(void *handle)
 	i_psctx->read_buffer = NULL;
     }
 
-    /* Will snort get mad over this ...*/
     if(i_psctx != NULL)
     {
 	free(i_psctx);
