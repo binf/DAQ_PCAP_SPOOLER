@@ -2,8 +2,8 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.62)
-AC_INIT([daq_pcap_spooler], [0.2], [beenph@gmail.com])
-AM_INIT_AUTOMAKE([daq], [0.2])
+AC_INIT([daq_pcap_spooler], [0.3], [beenph@gmail.com])
+AM_INIT_AUTOMAKE([daq], [0.3])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([daq_pcap_spooler.c])
 AC_CONFIG_HEADERS([config.h])
@@ -70,8 +70,18 @@ else
   AC_CHECK_FUNCS([lseek fstat])
 fi
 
+
+AC_ARG_ENABLE(yaf,
+	[  --enable-yaf Enable yaf filename support (default:no)],
+	[enable_yaf="yes"],[enable_yaf="no"])
+
+if test "x$enable_yaf" == "xyes"; then
+   AC_DEFINE([YAF_SUPPORT],[1],[Spooler uses YAF file name])
+fi
+
+
 # Checks for header files.
-AC_CHECK_HEADERS([netinet/in.h stdint.h stdlib.h string.h pcap.h bpf.h])
+AC_CHECK_HEADERS([netinet/in.h stdint.h stdlib.h string.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_SIZE_T
@@ -79,7 +89,10 @@ AC_TYPE_UINT8_T
 AC_TYPE_UINT32_T
 
 # Checks for library functions.
-AC_FUNC_MALLOC
+#break compile on some system
+#AC_FUNC_MALLOC 
+#break compile on some system
+
 AC_CHECK_FUNCS([memset strchr strdup strerror strtol])
 
 # Substitutions

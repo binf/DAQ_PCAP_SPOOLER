@@ -31,7 +31,7 @@
 /* Should we support other type of pcap out there ? */
 #define TCPDUMP_MAGIC 0xa1b2c3d4
 
-#define DAQ_PCAP_SPOOLER_VERSION 2
+#define DAQ_PCAP_SPOOLER_VERSION 3 
 
 #define DAQ_PCAP_SPOOLER_CAPABILITIES  (DAQ_CAPA_UNPRIV_START|DAQ_CAPA_BPF|DAQ_CAPA_BREAKLOOP);
 
@@ -39,10 +39,45 @@
 
 
 #define DEFAULT_PCAP_SPOOLER_FILE_PREFIX "daemonlogger.pcap"
+
+#ifdef YAF_SUPPORT
+#define DEFAULT_PCAP_SPOOLER_YAF_PREFIX "yaf_"
+#endif
+
 #define DEFAULT_PCAP_SPOOLER_SPOOL_DIRECTORY "/var/log/snort/log"
 #define DEFAULT_PCAP_SPOOLER_ARCHIVE_DIRECTORY "/var/log/snort/archive"
 #define DEFAULT_PCAP_SPOOLER_REFERENCE_FILE "/var/log/snort/PSRF"
 #define DEFAULT_PCAP_SPOOLER_UPDATE_WINDOW 50
+
+
+
+/* 
+Include mockup structure so it also work fine on 64bit system.
+*/
+
+struct pcap_file_header {
+    u_int32_t magic;
+    u_short version_major;
+    u_short version_minor;
+    int32_t thiszone;     /* gmt to local correction */
+    u_int32_t sigfigs;    /* accuracy of timestamps */
+    u_int32_t snaplen;    /* max length saved portion of each pkt */
+    u_int32_t linktype;   /* data link type (LINKTYPE_*) */
+};
+
+
+
+struct pcap_pkthdr {
+    //struct timeval ts;      /* time stamp */
+    u_int32_t timesec;
+    u_int32_t timeusec;
+    u_int32_t caplen;     /* length of portion present */
+    u_int32_t len;        /* length this packet (off wire) */
+};
+/* 
+Include mockup structure so it also work fine on 64bit system.
+*/
+
 
 
 typedef struct _PcapReference
@@ -51,6 +86,9 @@ typedef struct _PcapReference
     char spooler_directory[PATH_MAX];
     char archive_directory[PATH_MAX];
     u_int32_t timestamp;
+#ifdef YAF_SUPPORT
+    u_int32_t serial;
+#endif
     off_t last_read_offset;
     ssize_t saved_size;
 } PcapReference;
@@ -162,6 +200,12 @@ static u_int32_t pcap_spooler_move_pcap(pcap_spooler_context *i_psctx);
 static int pcap_spooler_directory_filter(const struct dirent *pcap_file_comp);
 static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx);
 static int pcap_spooler_daq_dummy_funct(void *,...);
+
+#ifdef YAF_SUPPORT
+static u_int32_t pcap_spooler_yaf_timestamp_to_utc(char *timestamp,time_t *out_utc);
+static u_int32_t pcap_spooler_yaf_utc_to_timestamp(time_t in_utc,char *out_timestamp);
+#endif 
+
 /**
  **
  ** PCAP SPOOLER FUNCTIONS PROTOTYPES

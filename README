@@ -1,6 +1,6 @@
 #
 #
-# DAQ_PCAP_SPOOLER v2
+# DAQ_PCAP_SPOOLER v3
 #
 # (c) 2012 Eric Lauzon <beenph@gmail.com>
 #
@@ -33,7 +33,16 @@
  make
  make install OR copy .libs/daq_pcap_spooler.so to your favorite DAQ library directory and enjoy.
 
- You can configure the module with --enable-largefile to support >2GB capture files.
+
+#
+# Configure option
+#
+[--enable-yaf]
+Will use yaf_TIMESTAMP_SERIAL.pcap file pattern instead of PREFIX.timestamp to read pcap spooled file.
+
+[--enable-largfile]
+Support for >2gb capture file.
+
 
 #
 # DAQ Variables:
