@@ -1,6 +1,6 @@
 #
 #
-# DAQ_PCAP_SPOOLER v3
+# DAQ_PCAP_SPOOLER v4
 #
 # (c) 2012 Eric Lauzon <beenph@gmail.com>
 #
@@ -37,9 +37,6 @@
 #
 # Configure option
 #
-[--enable-yaf]
-Will use yaf_TIMESTAMP_SERIAL.pcap file pattern instead of PREFIX.timestamp to read pcap spooled file.
-
 [--enable-largfile]
 Support for >2gb capture file.
 
@@ -48,6 +45,12 @@ Support for >2gb capture file.
 # DAQ Variables:
 # 
 
+
+# operation_mode
+#
+# Default: pcap
+
+  Define what type of file to monitor support (pcap|PCAP or yaf|YAF)
 
 # file_prefix
 #

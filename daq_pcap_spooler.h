@@ -31,24 +31,24 @@
 /* Should we support other type of pcap out there ? */
 #define TCPDUMP_MAGIC 0xa1b2c3d4
 
-#define DAQ_PCAP_SPOOLER_VERSION 3 
+#define DAQ_PCAP_SPOOLER_VERSION 4
 
 #define DAQ_PCAP_SPOOLER_CAPABILITIES  (DAQ_CAPA_UNPRIV_START|DAQ_CAPA_BPF|DAQ_CAPA_BREAKLOOP);
 
 #define DEFAULT_PCAP_SPOOLER_BLOCK_MULTIPLE 128
 
-
 #define DEFAULT_PCAP_SPOOLER_FILE_PREFIX "daemonlogger.pcap"
-
-#ifdef YAF_SUPPORT
 #define DEFAULT_PCAP_SPOOLER_YAF_PREFIX "yaf_"
-#endif
+
 
 #define DEFAULT_PCAP_SPOOLER_SPOOL_DIRECTORY "/var/log/snort/log"
 #define DEFAULT_PCAP_SPOOLER_ARCHIVE_DIRECTORY "/var/log/snort/archive"
 #define DEFAULT_PCAP_SPOOLER_REFERENCE_FILE "/var/log/snort/PSRF"
-#define DEFAULT_PCAP_SPOOLER_UPDATE_WINDOW 50
+#define DEFAULT_PCAP_SPOOLER_UPDATE_WINDOW 2000
 
+/* Define your OPERATION_MODE here */
+#define OPERATION_MODE_PCAP 0x0001
+#define OPERATION_MODE_YAF  0x0002
 
 
 /* 
@@ -69,8 +69,8 @@ struct pcap_file_header {
 
 struct pcap_pkthdr {
     //struct timeval ts;      /* time stamp */
-    u_int32_t timesec;
-    u_int32_t timeusec;
+    u_int32_t timesec;        /* fix some compilation issue */
+    u_int32_t timeusec;      /* fix some compilation issue */
     u_int32_t caplen;     /* length of portion present */
     u_int32_t len;        /* length this packet (off wire) */
 };
@@ -86,12 +86,14 @@ typedef struct _PcapReference
     char spooler_directory[PATH_MAX];
     char archive_directory[PATH_MAX];
     u_int32_t timestamp;
-#ifdef YAF_SUPPORT
-    u_int32_t serial;
-#endif
+    u_int32_t operation_mode; /* Check if we are re-run in the same operation mode */
+    u_int32_t serial; /* Used if running in YAF support mode */
+    
     off_t last_read_offset;
     ssize_t saved_size;
 } PcapReference;
+
+
 
 
 typedef struct _pcap_spooler_context 
@@ -107,6 +109,7 @@ typedef struct _pcap_spooler_context
     char *archive_directory;
     char *pcap_reference_file;
     u_int32_t pcap_update_window;
+    u_int32_t operation_mode;
     /* Configuration Parameters */
     
     /* Contextual information */
@@ -200,11 +203,9 @@ static u_int32_t pcap_spooler_move_pcap(pcap_spooler_context *i_psctx);
 static int pcap_spooler_directory_filter(const struct dirent *pcap_file_comp);
 static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx);
 static int pcap_spooler_daq_dummy_funct(void *,...);
-
-#ifdef YAF_SUPPORT
 static u_int32_t pcap_spooler_yaf_timestamp_to_utc(char *timestamp,time_t *out_utc);
 static u_int32_t pcap_spooler_yaf_utc_to_timestamp(time_t in_utc,char *out_timestamp);
-#endif 
+
 
 /**
  **

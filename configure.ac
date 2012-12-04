@@ -2,8 +2,8 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.62)
-AC_INIT([daq_pcap_spooler], [0.3], [beenph@gmail.com])
-AM_INIT_AUTOMAKE([daq], [0.3])
+AC_INIT([daq_pcap_spooler], [0.4], [beenph@gmail.com])
+AM_INIT_AUTOMAKE([daq], [0.4])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([daq_pcap_spooler.c])
 AC_CONFIG_HEADERS([config.h])
@@ -30,7 +30,7 @@ AC_CHECK_FUNCS([daq_hup_apply] [daq_acquire_with_meta])
 AC_DEFUN([AC_CHECK_DAQ_API_VER],
 [
 AC_MSG_CHECKING([DAQ_API_VERSION])
-AC_LINK_IFELSE([
+AC_RUN_IFELSE([
   AC_LANG_SOURCE(
   [[
      #include <daq_api.h>
@@ -68,15 +68,6 @@ if test "x$enable_largefile" == "xyes"; then
   AC_DEFINE([LARGEFILE_SUPPORT],[1],[We support large file])
 else
   AC_CHECK_FUNCS([lseek fstat])
-fi
-
-
-AC_ARG_ENABLE(yaf,
-	[  --enable-yaf Enable yaf filename support (default:no)],
-	[enable_yaf="yes"],[enable_yaf="no"])
-
-if test "x$enable_yaf" == "xyes"; then
-   AC_DEFINE([YAF_SUPPORT],[1],[Spooler uses YAF file name])
 fi
 
 

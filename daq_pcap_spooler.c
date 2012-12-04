@@ -90,11 +90,9 @@ DAQ_SO_PUBLIC const DAQ_Module_t DAQ_MODULE_DATA =
     .inject = NULL,           
     .get_device_index = NULL,  
     /* Unsupported */
-    
-
 #endif /* BUILDING_SO */
-    
 };
+
 
 
 /**
@@ -188,6 +186,7 @@ static u_int32_t pcap_spooler_write_pcap_reference(pcap_spooler_context *i_psctx
 			     "\tPSRF last read offset -> [%u] \n"
 #endif
 			     "\tPSRF saved size -> [%u] \n"
+			     "\tPSRF operation mode -> [%d] \n"
 			     "\t--------------\n\n",
 			     i_psctx->pcap_reference_file,
 			     i_psctx->pcap_reference.spooler_directory,
@@ -199,7 +198,8 @@ static u_int32_t pcap_spooler_write_pcap_reference(pcap_spooler_context *i_psctx
 #else
 			     (u_int32_t)i_psctx->pcap_reference.last_read_offset,
 #endif
-			     (u_int32_t)i_psctx->pcap_reference.saved_size);
+			     (u_int32_t)i_psctx->pcap_reference.saved_size,
+			     i_psctx->pcap_reference.operation_mode);
     
     return 0;
 }
@@ -237,7 +237,7 @@ static u_int32_t pcap_spooler_get_header(pcap_spooler_context *i_psctx)
     
     i_psctx->pcap_stat.st_size = 0;
     
-    while(i_psctx->pcap_stat.st_size < sizeof(struct pcap_file_header))
+    while(i_psctx->pcap_stat.st_size < (ssize_t)sizeof(struct pcap_file_header))
     {
 	if( pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat))
 	{
@@ -298,6 +298,12 @@ static u_int32_t pcap_spooler_close_pcap(pcap_spooler_context *i_psctx)
 
 static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
 {
+
+    /* YAF */
+    char yaf_timestamp_str[15] = {0};
+    char yaf_serial_str[6] = {0};
+    
+
     if(i_psctx == NULL)
     {
 	return 1;
@@ -305,31 +311,32 @@ static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
     
     memset(i_psctx->pcap_file_temp_name,'\0',PATH_MAX);
     
-#ifdef YAF_SUPPORT
-    
-    char yaf_timestamp_str[15] = {0};
-    char yaf_serial_str[6] = {0};
-
-    
-    if( (pcap_spooler_yaf_utc_to_timestamp((time_t)i_psctx->pcap_reference.timestamp,yaf_timestamp_str)))
-    {
-	return 1;
+    switch(i_psctx->operation_mode)
+    {	
+    case OPERATION_MODE_YAF:
+	
+	if( (pcap_spooler_yaf_utc_to_timestamp((time_t)i_psctx->pcap_reference.timestamp,yaf_timestamp_str)))
+	{
+	    return 1;
+	}
+	
+	snprintf(yaf_serial_str,6,"%.05d",i_psctx->pcap_reference.serial);
+	
+	snprintf(i_psctx->pcap_file_temp_name,PATH_MAX,"%s/%s%s_%s.pcap",
+		 i_psctx->pcap_reference.spooler_directory,
+		 i_psctx->pcap_reference.file_prefix,
+		 yaf_timestamp_str,
+		 yaf_serial_str);
+	break;
+	
+    default:
+	snprintf(i_psctx->pcap_file_temp_name,PATH_MAX,"%s/%s.%u",
+		 i_psctx->pcap_reference.spooler_directory,
+		 i_psctx->pcap_reference.file_prefix,
+		 i_psctx->pcap_reference.timestamp);
+	break;
     }
-
-    snprintf(yaf_serial_str,6,"%.05d",i_psctx->pcap_reference.serial);
-
-    snprintf(i_psctx->pcap_file_temp_name,PATH_MAX,"%s/%s%s_%s.pcap",
-	     i_psctx->pcap_reference.spooler_directory,
-	     i_psctx->pcap_reference.file_prefix,
-	     yaf_timestamp_str,
-	     yaf_serial_str);
-#else
-    snprintf(i_psctx->pcap_file_temp_name,PATH_MAX,"%s/%s.%u",
-	     i_psctx->pcap_reference.spooler_directory,
-	     i_psctx->pcap_reference.file_prefix,
-	     i_psctx->pcap_reference.timestamp);
-#endif    
-
+    
     pcap_spooler_debug_print(i_psctx,(char *)
 			     "\tOpening [%s] \n",
 			     i_psctx->pcap_file_temp_name);
@@ -410,7 +417,6 @@ static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
 
 static u_int32_t pcap_spooler_open_pcap_reference(pcap_spooler_context *i_psctx)
 {
-
     ssize_t read_len = 0;
     
     if(i_psctx == NULL)
@@ -434,10 +440,10 @@ static u_int32_t pcap_spooler_open_pcap_reference(pcap_spooler_context *i_psctx)
 	i_psctx->packet_reference_fd = -1;
 	return 1;
     }
-
     
-    if( (read_len < sizeof(PcapReference)) ||
-	(read_len > sizeof(PcapReference)))
+    
+    if( (read_len < (ssize_t)sizeof(PcapReference)) ||
+	(read_len > (ssize_t)sizeof(PcapReference)))
     {
 	close(i_psctx->packet_reference_fd);
 	pcap_spooler_debug_print(i_psctx,(char *)
@@ -479,6 +485,8 @@ static u_int32_t pcap_spooler_create_pcap_reference(pcap_spooler_context *i_psct
     memcpy(i_psctx->pcap_reference.spooler_directory,i_psctx->spooler_directory,PATH_MAX);
     memcpy(i_psctx->pcap_reference.archive_directory,i_psctx->archive_directory,PATH_MAX);
     
+    i_psctx->pcap_reference.operation_mode = i_psctx->operation_mode;
+    
     if( (pcap_spooler_write_pcap_reference(i_psctx)))
     {
 	pcap_spooler_debug_print(i_psctx,(char *)
@@ -486,7 +494,6 @@ static u_int32_t pcap_spooler_create_pcap_reference(pcap_spooler_context *i_psct
                                  i_psctx->pcap_reference_file);
 	return 1;
     }
-
 
     return 0;
 }
@@ -500,19 +507,23 @@ static u_int32_t pcap_spooler_compare_pcap_reference(pcap_spooler_context *i_psc
 	return 1;
     }
     
-    if( (strncmp(i_psctx->pcap_reference.file_prefix,i_psctx->file_prefix,strlen(i_psctx->pcap_reference.file_prefix)) != 0 ) &&
-	(strncmp(i_psctx->pcap_reference.spooler_directory,i_psctx->spooler_directory,strlen(i_psctx->pcap_reference.spooler_directory)) !=0 ) &&
-	(strncmp(i_psctx->pcap_reference.archive_directory,i_psctx->archive_directory,strlen(i_psctx->pcap_reference.archive_directory)) !=0 ))
+    if( (strncmp(i_psctx->pcap_reference.file_prefix,i_psctx->file_prefix,strlen(i_psctx->pcap_reference.file_prefix)) != 0 ) ||
+	(strncmp(i_psctx->pcap_reference.spooler_directory,i_psctx->spooler_directory,strlen(i_psctx->pcap_reference.spooler_directory)) !=0 ) ||
+	(strncmp(i_psctx->pcap_reference.archive_directory,i_psctx->archive_directory,strlen(i_psctx->pcap_reference.archive_directory)) !=0 ) ||
+	(i_psctx->pcap_reference.operation_mode != i_psctx->operation_mode))
     {
 	pcap_spooler_debug_print(i_psctx,(char *)
-				 "\tERROR: [information from pcap spooler reference file does not match the defined variables] \n"
+				 "\tERROR: [information from pcap spooler reference file [%s] does not match the DAQ variables] \n"
 				 "\t--------------\n\n"
 				 "\tPSRF Spooler Directory  -> [%s] | DAQ Variable [%s] \n"
 				 "\tPSRF Archive Direcotory -> [%s] | DAQ Variable [%s]\n"
-				 "\tPSRF File Prefix -> [%s] | DAQ Variable [%s] \n",
+				 "\tPSRF File Prefix -> [%s] | DAQ Variable [%s] \n"
+				 "\tPSRF Operation mode [%d] | DAQ Variable [%d] \n",
+				 i_psctx->pcap_reference_file,
 				 i_psctx->pcap_reference.spooler_directory,i_psctx->spooler_directory,
 				 i_psctx->pcap_reference.archive_directory,i_psctx->archive_directory,
-				 i_psctx->pcap_reference.file_prefix,i_psctx->file_prefix);
+				 i_psctx->pcap_reference.file_prefix,i_psctx->file_prefix,
+				 i_psctx->pcap_reference.operation_mode,i_psctx->operation_mode);
 	return 1;
     }
     
@@ -530,20 +541,30 @@ static u_int32_t pcap_spooler_default(pcap_spooler_context *i_psctx)
     {
 	return 1;
     }
+
+    if(i_psctx->operation_mode  == 0)
+    {
+	i_psctx->operation_mode = OPERATION_MODE_PCAP;
+    }
     
     if(i_psctx->file_prefix == NULL)
     {
-#ifdef YAF_SUPPORT
-	if( (i_psctx->file_prefix = strndup(DEFAULT_PCAP_SPOOLER_YAF_PREFIX,PATH_MAX)) == NULL)
+	switch(i_psctx->operation_mode)
 	{
-	    return 1;
+	case OPERATION_MODE_YAF:
+	    if( (i_psctx->file_prefix = strndup(DEFAULT_PCAP_SPOOLER_YAF_PREFIX,PATH_MAX)) == NULL)
+	    {
+		return 1;
+	    }
+	    break;
+
+	default:
+	    if( (i_psctx->file_prefix = strndup(DEFAULT_PCAP_SPOOLER_FILE_PREFIX,PATH_MAX)) == NULL)
+	    {
+		return 1;
+	    }
+	    break;
 	}
-#else
-	if( (i_psctx->file_prefix = strndup(DEFAULT_PCAP_SPOOLER_FILE_PREFIX,PATH_MAX)) == NULL)
-	{
-	    return 1;
-	}
-#endif
     }
 
     if(i_psctx->spooler_directory == NULL)
@@ -784,6 +805,31 @@ static int pcap_spooler_parse_args(pcap_spooler_context *i_psctx,const DAQ_Confi
 	    }
 	}
 	
+	if (!strcmp(entry->key, "operation_mode"))
+	{
+	    char *def_mode = NULL;
+	    
+	    if( (def_mode = strndup(entry->value,32)) == NULL)
+	    {
+		return DAQ_ERROR;
+	    }
+	    
+	    if( (strncasecmp(def_mode,"pcap",32) == 0))
+	    {
+		i_psctx->operation_mode = OPERATION_MODE_PCAP;
+	    }
+	    else if( (strncasecmp(def_mode,"yaf",32) == 0))
+	    {
+		i_psctx->operation_mode = OPERATION_MODE_YAF;
+	    }
+	    else
+	    {
+		free(def_mode);
+		return DAQ_ERROR;
+	    }
+	    
+	    free(def_mode);
+	}
     }
     
     if(pcap_spooler_default(i_psctx))
@@ -808,58 +854,62 @@ static u_int32_t pcap_spooler_move_pcap(pcap_spooler_context *i_psctx)
     char old_path[PATH_MAX] = {0};
     char new_path[PATH_MAX] = {0};
     
+    /* YAF */
+    char yaf_timestamp_str[15] = {0};
+    /* YAF */
+
     if(i_psctx == NULL)
     {
 	return 1;
     }
     
 
-#ifdef YAF_SUPPORT
-
-    char yaf_timestamp_str[15] = {0};
-    
-    if( (pcap_spooler_yaf_utc_to_timestamp((time_t)i_psctx->pcap_reference.timestamp,yaf_timestamp_str)))
+    switch(i_psctx->operation_mode)
     {
-        return 1;
-    }
-
-    if( (snprintf(old_path,PATH_MAX,"%s/%s%s_%.5u.pcap",
-                  i_psctx->pcap_reference.spooler_directory,
-                  i_psctx->pcap_reference.file_prefix,
-                  yaf_timestamp_str,
-		  i_psctx->pcap_reference.serial)) < 0)
-    {
-        return 1;
-    }
-    
-    if( (snprintf(new_path,PATH_MAX,"%s/%s%s_%.5u.pcap",
-                  i_psctx->pcap_reference.archive_directory,
-                  i_psctx->pcap_reference.file_prefix,
-                  yaf_timestamp_str,
- 		  i_psctx->pcap_reference.serial)) < 0)
-    {
-        return 1;
-    }
-    
-#else
-
-    if( (snprintf(old_path,PATH_MAX,"%s/%s.%u",
-		  i_psctx->pcap_reference.spooler_directory,
+    case OPERATION_MODE_YAF:
+	if( (pcap_spooler_yaf_utc_to_timestamp((time_t)i_psctx->pcap_reference.timestamp,yaf_timestamp_str)))
+	{
+	    return 1;
+	}
+	
+	if( (snprintf(old_path,PATH_MAX,"%s/%s%s_%.5u.pcap",
+		      i_psctx->pcap_reference.spooler_directory,
+		      i_psctx->pcap_reference.file_prefix,
+		      yaf_timestamp_str,
+		      i_psctx->pcap_reference.serial)) < 0)
+	{
+	    return 1;
+	}
+	
+	if( (snprintf(new_path,PATH_MAX,"%s/%s%s_%.5u.pcap",
+		      i_psctx->pcap_reference.archive_directory,
+		      i_psctx->pcap_reference.file_prefix,
+		      yaf_timestamp_str,
+		      i_psctx->pcap_reference.serial)) < 0)
+	{
+	    return 1;
+	}
+	break;
+	
+    default:
+	if( (snprintf(old_path,PATH_MAX,"%s/%s.%u",
+		      i_psctx->pcap_reference.spooler_directory,
+		      i_psctx->pcap_reference.file_prefix,
+		      i_psctx->pcap_reference.timestamp)) < 0)
+	{
+	    return 1;
+	}
+	
+	
+	if( (snprintf(new_path,PATH_MAX,"%s/%s.%u",
+		      i_psctx->pcap_reference.archive_directory,
 		  i_psctx->pcap_reference.file_prefix,
-		  i_psctx->pcap_reference.timestamp)) < 0)
-    {
-	return 1;
+		      i_psctx->pcap_reference.timestamp)) < 0)
+	{
+	    return 1;
+	}
+	break;
     }
-    
-    
-    if( (snprintf(new_path,PATH_MAX,"%s/%s.%u",
-		  i_psctx->pcap_reference.archive_directory,
-		  i_psctx->pcap_reference.file_prefix,
-		  i_psctx->pcap_reference.timestamp)) < 0)
-    {
-	return 1;
-    }
-#endif
     
     pcap_spooler_debug_print(i_psctx,(char *)
 			     "\tMoving file [%s] to [%s] \n",
@@ -876,7 +926,9 @@ static u_int32_t pcap_spooler_move_pcap(pcap_spooler_context *i_psctx)
 static int pcap_spooler_directory_filter(const struct dirent *pcap_file_comp)
 {
     unsigned int pcap_file_prefix_len = 0;
+    int fnamelen = 0;
     
+    int operation_mode = 0;
     
     if(pcap_file_comp == NULL)
     {
@@ -888,41 +940,55 @@ static int pcap_spooler_directory_filter(const struct dirent *pcap_file_comp)
 	return 0;
     }
     
+    /* Not the cleanest way, we could use a static ...but could cause trouble */
+    if(strstr(pcap_file_comp->d_name,"yaf_") != NULL)
+    {
+	operation_mode = OPERATION_MODE_YAF;
+    }
+    else
+    {
+	operation_mode = OPERATION_MODE_PCAP;
+    }
+    
+    
     pcap_file_prefix_len = strlen(pcap_file_prefix);
 
-#ifdef YAF_SUPPORT
-/* Ignore lock files */
     
-    int fnamelen = strlen(pcap_file_comp->d_name);
-    
-    if( (fnamelen <= 34) &&
-	(fnamelen >= 29))
+    switch(operation_mode)
     {
-	if(strncmp(pcap_file_comp->d_name,"yaf_",4) == 0 )
+    case OPERATION_MODE_YAF:
+	
+	/* Ignore lock files */
+	fnamelen = strlen(pcap_file_comp->d_name);
+	
+	if( (fnamelen <= 34) &&
+	    (fnamelen >= 29))
 	{
-	    if(fnamelen <= 29)
+	    if(strncmp(pcap_file_comp->d_name,"yaf_",4) == 0 )
 	    {
+		if(fnamelen <= 29)
+		{
 		if(strncmp(&pcap_file_comp->d_name[24],".pcap",5) == 0 )
 		{
 		    return 1;
 		}
 	    }
-	}	
+	    }	
+	}
+	break;
+	
+    default:
+	if(strncmp(pcap_file_prefix,pcap_file_comp->d_name,pcap_file_prefix_len) == 0)
+	{
+	    return 1;
+	}
+	break;
     }
-       
-    return 0;
-#endif
     
-    if(strncmp(pcap_file_prefix,pcap_file_comp->d_name,pcap_file_prefix_len) == 0)
-    {
-	return 1;
-    }
-
     return 0;
 }
 
 
-#ifdef YAF_SUPPORT
 static u_int32_t pcap_spooler_yaf_timestamp_to_utc(char *timestamp,time_t *out_utc)
 {
     if( (timestamp == NULL) || 
@@ -995,7 +1061,7 @@ static u_int32_t pcap_spooler_yaf_utc_to_timestamp(time_t in_utc,char *out_times
     
     return 0;
 }
-#endif
+
 
 static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx)
 {
@@ -1004,15 +1070,21 @@ static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx)
     int num_file = 0;
     int x = 0;    
     
+    int new_file_check = 0;
+    
     unsigned long int current_stamp = 0;
     unsigned long int min_stamp = 0;
-    
-    
-#ifdef YAF_SUPPORT
-    unsigned long int min_serial = 0;
-#else
+
     unsigned long int prefix_len = 0;
-#endif 
+    
+    /* YAF */
+    unsigned long int min_serial = 0;
+    char yaf_serial_str[6] = {0};
+    char yaf_timestamp_str[15] = {0};
+	    
+    unsigned int yaf_serial = 0;
+    unsigned int yaf_timestamp = 0;
+    /* YAF */
     
     if(i_psctx == NULL)
     {
@@ -1029,145 +1101,166 @@ static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx)
     
     for(x = 0; x < num_file; x++)
     {
-	
-#ifdef YAF_SUPPORT
-	
-	char yaf_serial_str[6] = {0};
-	char yaf_timestamp_str[15] = {0};
-	
-	unsigned int yaf_serial = 0;
-        unsigned int yaf_timestamp = 0;
-	
-	memcpy(yaf_timestamp_str,&pcap_file_list[x]->d_name[4],14);	
-	memcpy(yaf_serial_str,&pcap_file_list[x]->d_name[19],5);
-	
-	yaf_serial = strtoul(yaf_serial_str,NULL,10);
-	
-	if( (pcap_spooler_yaf_timestamp_to_utc(yaf_timestamp_str,(time_t *)&yaf_timestamp)))
+	switch(i_psctx->operation_mode)
 	{
-	    return 1;
+	case OPERATION_MODE_YAF:
+	    
+	    memcpy(yaf_timestamp_str,&pcap_file_list[x]->d_name[4],14);	
+	    memcpy(yaf_serial_str,&pcap_file_list[x]->d_name[19],5);
+	    
+	    yaf_serial = strtoul(yaf_serial_str,NULL,10);
+	    
+	    if( (pcap_spooler_yaf_timestamp_to_utc(yaf_timestamp_str,(time_t *)&yaf_timestamp)))
+	    {
+		return 1;
+	    }
+	    
+	    current_stamp = yaf_timestamp;
+	    break;
+	    
+	default:
+	    prefix_len = strlen(pcap_file_prefix) + 1;
+	    current_stamp = strtoul(&pcap_file_list[x]->d_name[prefix_len],NULL,10);
+	    break;
 	}
 	
-	current_stamp = yaf_timestamp;
-#else
 	
-	prefix_len = strlen(pcap_file_prefix) + 1;
-	current_stamp = strtoul(&pcap_file_list[x]->d_name[prefix_len],NULL,10);
+	switch(i_psctx->operation_mode)
+	{
+	case OPERATION_MODE_YAF:
+	    if(min_stamp == 0 &&
+	       ((current_stamp > i_psctx->pcap_reference.timestamp) ||
+		((current_stamp == i_psctx->pcap_reference.timestamp) && (yaf_serial > i_psctx->pcap_reference.serial))))
+	    {
+		min_stamp = current_stamp;
+		min_serial = yaf_serial;
+	    }
+	    break;
+	    
+	default:
+	    if( (min_stamp == 0)  &&
+		(current_stamp > i_psctx->pcap_reference.timestamp))
+	    {
+		min_stamp = current_stamp;
+	    }
+	    break;
+	}
 	
-#endif
+	
+	switch(i_psctx->operation_mode)
+	{
+	case OPERATION_MODE_YAF:
+	    if( ((current_stamp <  min_stamp) ||
+		 ((current_stamp ==  min_stamp) && (yaf_serial < min_serial))))
+	    {
+		min_stamp = current_stamp;
+		min_serial = yaf_serial;
+	    }  
+	    break;
 
-
-#ifdef YAF_SUPPORT
-	 if(min_stamp == 0 &&
-	    ((current_stamp > i_psctx->pcap_reference.timestamp) ||
-	    ((current_stamp == i_psctx->pcap_reference.timestamp) && (yaf_serial > i_psctx->pcap_reference.serial))))
-	 {
-	     min_stamp = current_stamp;
-	     min_serial = yaf_serial;
-	 }
-#else
-	 if( (min_stamp == 0)  &&
-	     (current_stamp > i_psctx->pcap_reference.timestamp))
-	 {
-	     min_stamp = current_stamp;
-	 }
-#endif
-	 
-#ifdef YAF_SUPPORT
-	 if( ((current_stamp <  min_stamp) ||
-	      ((current_stamp ==  min_stamp) &&(yaf_serial < min_serial))))
-	 {
-	     min_stamp = current_stamp;
-	     min_serial = yaf_serial;
-	 }  
-	 
-#else
-	 if( (current_stamp <= min_stamp))
-	 {
-	     min_stamp = current_stamp;
-	 }
-#endif
-	 
-    }
+	default:
+	    if( (current_stamp <= min_stamp))
+	    {
+		min_stamp = current_stamp;
+	    }
+	    break;
+	}
     
-	     
-#ifdef YAF_SUPPORT
+    }        
     
-    if( (min_stamp > i_psctx->pcap_reference.timestamp) ||
-	((min_stamp == i_psctx->pcap_reference.timestamp) && (min_serial > i_psctx->pcap_reference.serial)))
+    
+    switch(i_psctx->operation_mode)
     {
+    case OPERATION_MODE_YAF:
+	if( (min_stamp > i_psctx->pcap_reference.timestamp) ||
+	    ((min_stamp == i_psctx->pcap_reference.timestamp) && (min_serial > i_psctx->pcap_reference.serial)))
+	{
+	    new_file_check = 1;
+	}
 	
-#else    
+	break;
+	
+    default:
 	if(min_stamp > i_psctx->pcap_reference.timestamp)
 	{
+	    new_file_check = 1;
+	}
+	break;
+    }
+    
+    if((new_file_check))
+    {
+	if((i_psctx->has_PCAP) &&
+	   (i_psctx->read_full))
+	{
+	    i_psctx->read_full = 0;
 	    
-#endif
-	    if( (i_psctx->has_PCAP) &&
-		(i_psctx->read_full))
+	    if(i_psctx->enable_archive)
 	    {
-		i_psctx->read_full = 0;
-		
-		if(i_psctx->enable_archive)
-		{
-		    if(pcap_spooler_move_pcap(i_psctx))
-		    {
-			goto f_err;
-		    }
-		}
-		
-		if( pcap_spooler_close_pcap(i_psctx))
+		if(pcap_spooler_move_pcap(i_psctx))
 		{
 		    goto f_err;
 		}
 	    }
 	    
-#ifdef YAF_SUPPORT
+	    if( pcap_spooler_close_pcap(i_psctx))
+	    {
+		goto f_err;
+	    }
+	}
+	
+	switch(i_psctx->operation_mode)
+	{
+	case OPERATION_MODE_YAF:
 	    i_psctx->pcap_reference.timestamp = min_stamp;
 	    i_psctx->pcap_reference.serial = min_serial;    
-#else
+	    break;
+	    
+	default:
 	    i_psctx->pcap_reference.timestamp = min_stamp;
-#endif
-	    
-	    /* We are opening a new file, make sure that even if we would crash and write the PSRF that the PSRF is re-initialized */
-	    i_psctx->pcap_reference.last_read_offset = 0;
-	    i_psctx->pcap_reference.saved_size = 0;
-	    
-	    if( pcap_spooler_open_pcap(i_psctx))
-	    {
+	    break;
+	}
+	
+	/* We are opening a new file, make sure that even if we would crash and write the PSRF that the PSRF is re-initialized */
+	i_psctx->pcap_reference.last_read_offset = 0;
+	i_psctx->pcap_reference.saved_size = 0;
+	
+	if( pcap_spooler_open_pcap(i_psctx))
+	{
 		goto f_err;
-	    }
-	    
-	    if( pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat))
-	    {
-			 goto f_err;
-	    }
-	    
-	    i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
-	    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
-		     
-	    if( (pcap_spooler_write_pcap_reference(i_psctx)))
-	    {
-		goto f_err;
-	    }
-	}
-	else
-	{
-	    /* in case its stalling for some reason */
-	    usleep(200);
 	}
 	
-	if(pcap_file_list != NULL)
+	if( pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat))
 	{
-	    free(pcap_file_list);
+	    goto f_err;
 	}
 	
-	return 0;
+	i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
+	i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
 	
-    f_err:
-	if(pcap_file_list != NULL)
+	if( (pcap_spooler_write_pcap_reference(i_psctx)))
 	{
+	    goto f_err;
+	}
+    }
+    else
+    {
+	/* in case its stalling for some reason */
+	usleep(200);
+    }
+    
+    if(pcap_file_list != NULL)
+    {
 	free(pcap_file_list);
-	}
+    }
+    
+    return 0;
+    
+f_err:
+    if(pcap_file_list != NULL)
+    {
+	free(pcap_file_list);
+    }
     
     return 1;
 }
@@ -1394,50 +1487,48 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
     {
 	return 1;
     }
-    
-    if(i_psctx->has_PCAP)
+
+if(i_psctx->has_PCAP)
+{
+    if( pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat))
     {
-	if( pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat))
+	return 1;
+    }
+    
+    total_size = i_psctx->pcap_stat.st_size;
+    
+    if(i_psctx->pcap_reference.last_read_offset != 0)
+    {
+	current_offset = lseek(i_psctx->pcap_fd,i_psctx->pcap_reference.last_read_offset,SEEK_SET);
+    }
+    else
+    {
+	current_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
+    }
+    
+    while(current_offset < total_size)
+    {    
+	if(pcap_spooler_read_bulk(i_psctx->pcap_fd,(void *)i_psctx->read_buffer,i_psctx->read_buffer_size,&read_size))
 	{
 	    return 1;
 	}
 	
-	total_size = i_psctx->pcap_stat.st_size;
+	current_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
+	process_offset = 0;
+	off_read = 0;
 	
-	if(i_psctx->pcap_reference.last_read_offset != 0)
-	{
-	    current_offset = lseek(i_psctx->pcap_fd,i_psctx->pcap_reference.last_read_offset,SEEK_SET);
-	}
-	else
-	{
-	    current_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
-	}
-	
-	while(current_offset < total_size)
-	{    
-	    if(pcap_spooler_read_bulk(i_psctx->pcap_fd,(void *)i_psctx->read_buffer,i_psctx->read_buffer_size,&read_size))
-	    {
-		return 1;
-	    }
-	    
-	    current_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
-	    process_offset = 0;
-	    off_read = 0;
-
-	    while(process_offset < read_size)
+	while(process_offset < read_size)
 	    {
 		packet_filter_eval = 1;
 		pkthdrptr=(struct pcap_pkthdr *)(i_psctx->read_buffer+process_offset);
 		
-		//if( (process_offset+sizeof(struct pcap_pkthdr)) >= (u_int32_t)read_size)
-		if( (process_offset+sizeof(struct pcap_pkthdr)) >= read_size)
+		if( (process_offset + (off_t)sizeof(struct pcap_pkthdr)) >= read_size)
 		{
 		    pcap_rebuffer=1;
 		    break;
 		}
 		
-		//if( (process_offset+sizeof(struct pcap_pkthdr)+pkthdrptr->caplen) > (u_int32_t)read_size)
-		if( (process_offset+sizeof(struct pcap_pkthdr)+pkthdrptr->caplen) > read_size)
+		if( (process_offset + (off_t)sizeof(struct pcap_pkthdr)+pkthdrptr->caplen) > read_size)
 		{
 		    pcap_rebuffer=1;
 		    break;
@@ -1478,7 +1569,7 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 		    /* Is this needed? */
 		    if (verdict >= MAX_DAQ_VERDICT)
 			verdict = DAQ_VERDICT_PASS;
-		        
+		    
 		    i_psctx->stats.verdicts[verdict]++;
 		}
 		
@@ -1499,80 +1590,80 @@ static int pcap_spooler_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t c
 		    {
 			return 1;
 		    }
-		        
+		    
 		    i_psctx->read_packet = 0;
 		    off_read = 0;
 		}
 	    }
-	        
-	    if(pcap_rebuffer)
+	
+	if(pcap_rebuffer)
+	{
+	    pcap_rebuffer=0;
+		
+	    last_processed_offset = current_offset - (read_size -  process_offset);
+	    
+	    if( (i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,last_processed_offset,SEEK_SET)) < 0)
 	    {
-		pcap_rebuffer=0;
-		
-		last_processed_offset = current_offset - (read_size -  process_offset);
-		
-		if( (i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,last_processed_offset,SEEK_SET)) < 0)
-		{
-		    return 1;
-		}
-		
-		if( (pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat)))
-		{
-		    return 1;
-		}
-		
-		i_psctx->pcap_reference.last_read_offset = last_processed_offset;
-		i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
-		
-		
-		if( (pcap_spooler_write_pcap_reference(i_psctx)))
-		{
-		    /* XXX */
-		    return 1;
-		}
-
-		current_offset = i_psctx->pcap_reference.last_read_offset;
-		usleep(20);
+		return 1;
 	    }
 	    
-	    memset(i_psctx->read_buffer,'\0',i_psctx->read_buffer_size);
-	}
-    }
-    
-    
-    if( (i_psctx->has_PCAP)) 
-    {
-	if( (pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat)))
-	{
-	    return 1;
-	}
-
-	if(total_size == current_offset)
-	{
-	    i_psctx->read_full = 1;
-	    i_psctx->pcap_reference.last_read_offset = total_size;
-	}
-	else if( ((i_psctx->pcap_stat.st_size > i_psctx->pcap_reference.saved_size) ||
-		  (i_psctx->pcap_stat.st_size > i_psctx->pcap_reference.last_read_offset)) &&
-		 (i_psctx->read_packet == i_psctx->pcap_update_window))
-	{
-	    i_psctx->read_packet=0;
+	    if( (pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat)))
+	    {
+		return 1;
+	    }
+	    
+	    i_psctx->pcap_reference.last_read_offset = last_processed_offset;
 	    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
+	    
 	    
 	    if( (pcap_spooler_write_pcap_reference(i_psctx)))
 	    {
 		/* XXX */
 		return 1;
 	    }
+	    
+	    current_offset = i_psctx->pcap_reference.last_read_offset;
+	    usleep(20);
 	}
+	
+	memset(i_psctx->read_buffer,'\0',i_psctx->read_buffer_size);
     }
-    
-    if( (pcap_spooler_monitor_directory(i_psctx)))
+}
+
+
+if( (i_psctx->has_PCAP)) 
+{
+    if( (pcap_spooler_get_stat(i_psctx->pcap_fd,& i_psctx->pcap_stat)))
     {
 	return 1;
     }
     
-    return 0;
+    if(total_size == current_offset)
+    {
+	i_psctx->read_full = 1;
+	i_psctx->pcap_reference.last_read_offset = total_size;
+    }
+    else if( ((i_psctx->pcap_stat.st_size > i_psctx->pcap_reference.saved_size) ||
+	      (i_psctx->pcap_stat.st_size > i_psctx->pcap_reference.last_read_offset)) &&
+	     (i_psctx->read_packet == i_psctx->pcap_update_window))
+    {
+	i_psctx->read_packet=0;
+	i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
+	
+	if( (pcap_spooler_write_pcap_reference(i_psctx)))
+	{
+	    /* XXX */
+	    return 1;
+	}
+    }
+}
+
+if( (pcap_spooler_monitor_directory(i_psctx)))
+{
+    return 1;
+}
+
+return 0;
 }
 
 
