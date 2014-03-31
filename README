@@ -1,8 +1,8 @@
 #
 #
-# DAQ_PCAP_SPOOLER v4
+# DAQ_PCAP_SPOOLER v5
 #
-# (c) 2012 Eric Lauzon <beenph@gmail.com>
+# (c) 2012-2014 Eric Lauzon <beenph@gmail.com>
 #
 #
 # Which came first, the pig or the barn?
@@ -57,6 +57,19 @@ Support for >2gb capture file.
 # Default: daemonlogger.pcap
 
   pcap file prefix being watched in the spool directory.
+
+# yaf_prefix
+#
+# Default: yaf
+
+  Need yaf >= 2.5.x to specify a prefix on capture.
+
+# yaf_prefix_separator
+#
+# Default: _
+
+ When need to define a prefix separator if a custom prefix is defined.
+
 
 # spool_directory
 #

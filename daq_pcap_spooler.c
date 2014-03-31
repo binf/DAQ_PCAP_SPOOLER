@@ -51,8 +51,18 @@ extern int errno;
 
 #include "daq_pcap_spooler.h"
 
-static char *pcap_file_prefix = NULL;
+//strtoull
+#if  _POSIX_C_SOURCE <= 200112L
+#define _POSIX_C_SOURCE  200112L
+#endif 
 
+#ifndef _BSD_SOURCE
+#define _BSD_SOURCE 1
+#endif
+//
+
+static char *pcap_file_prefix = NULL;
+static int dir_filter_op_mode = 0;
 
 #ifdef BUILDING_SO
 DAQ_SO_PUBLIC const DAQ_Module_t DAQ_MODULE_DATA =
@@ -301,8 +311,8 @@ static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
 
     /* YAF */
     char yaf_timestamp_str[15] = {0};
-    char yaf_serial_str[6] = {0};
-    
+    char yaf_serial_str[20] = {0}; /* the serial size has grown in version 2.5 should be fine for a while..*/
+
 
     if(i_psctx == NULL)
     {
@@ -320,12 +330,14 @@ static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
 	    return 1;
 	}
 	
-	snprintf(yaf_serial_str,6,"%.05d",i_psctx->pcap_reference.serial);
+	snprintf(yaf_serial_str,20,"%.llu",i_psctx->pcap_reference.serial);
 	
-	snprintf(i_psctx->pcap_file_temp_name,PATH_MAX,"%s/%s%s_%s.pcap",
+	snprintf(i_psctx->pcap_file_temp_name,PATH_MAX,"%s/%s%c%s%c%s.pcap",
 		 i_psctx->pcap_reference.spooler_directory,
 		 i_psctx->pcap_reference.file_prefix,
+		 i_psctx->pcap_reference.yaf_prefix_separator,
 		 yaf_timestamp_str,
+		 i_psctx->pcap_reference.yaf_separator,
 		 yaf_serial_str);
 	break;
 	
@@ -487,6 +499,13 @@ static u_int32_t pcap_spooler_create_pcap_reference(pcap_spooler_context *i_psct
     
     i_psctx->pcap_reference.operation_mode = i_psctx->operation_mode;
     
+    if(i_psctx->operation_mode == OPERATION_MODE_YAF)
+    {
+	i_psctx->pcap_reference.yaf_separator = i_psctx->yaf_separator;
+	i_psctx->pcap_reference.yaf_prefix_separator = i_psctx->yaf_prefix_separator;
+    }
+
+
     if( (pcap_spooler_write_pcap_reference(i_psctx)))
     {
 	pcap_spooler_debug_print(i_psctx,(char *)
@@ -510,7 +529,9 @@ static u_int32_t pcap_spooler_compare_pcap_reference(pcap_spooler_context *i_psc
     if( (strncmp(i_psctx->pcap_reference.file_prefix,i_psctx->file_prefix,strlen(i_psctx->pcap_reference.file_prefix)) != 0 ) ||
 	(strncmp(i_psctx->pcap_reference.spooler_directory,i_psctx->spooler_directory,strlen(i_psctx->pcap_reference.spooler_directory)) !=0 ) ||
 	(strncmp(i_psctx->pcap_reference.archive_directory,i_psctx->archive_directory,strlen(i_psctx->pcap_reference.archive_directory)) !=0 ) ||
-	(i_psctx->pcap_reference.operation_mode != i_psctx->operation_mode))
+	(i_psctx->pcap_reference.operation_mode != i_psctx->operation_mode) ||
+	(i_psctx->pcap_reference.yaf_separator != i_psctx->yaf_separator) ||
+	(i_psctx->pcap_reference.yaf_prefix_separator != i_psctx->yaf_prefix_separator))
     {
 	pcap_spooler_debug_print(i_psctx,(char *)
 				 "\tERROR: [information from pcap spooler reference file [%s] does not match the DAQ variables] \n"
@@ -519,11 +540,16 @@ static u_int32_t pcap_spooler_compare_pcap_reference(pcap_spooler_context *i_psc
 				 "\tPSRF Archive Direcotory -> [%s] | DAQ Variable [%s]\n"
 				 "\tPSRF File Prefix -> [%s] | DAQ Variable [%s] \n"
 				 "\tPSRF Operation mode [%d] | DAQ Variable [%d] \n",
+				 "\tPSRF yaf prefix [%c] | DAQ Variable [%c] \n",
+				 "\tPSRF yaf prefix separator [%c] | DAQ Variable [%c] \n",
+				 
 				 i_psctx->pcap_reference_file,
 				 i_psctx->pcap_reference.spooler_directory,i_psctx->spooler_directory,
 				 i_psctx->pcap_reference.archive_directory,i_psctx->archive_directory,
 				 i_psctx->pcap_reference.file_prefix,i_psctx->file_prefix,
-				 i_psctx->pcap_reference.operation_mode,i_psctx->operation_mode);
+				 i_psctx->pcap_reference.operation_mode,i_psctx->operation_mode,
+				 i_psctx->pcap_reference.yaf_separator,i_psctx->yaf_separator,
+				 i_psctx->pcap_reference.yaf_prefix_separator,i_psctx->yaf_prefix_separator);
 	return 1;
     }
     
@@ -552,11 +578,36 @@ static u_int32_t pcap_spooler_default(pcap_spooler_context *i_psctx)
 	switch(i_psctx->operation_mode)
 	{
 	case OPERATION_MODE_YAF:
-	    if( (i_psctx->file_prefix = strndup(DEFAULT_PCAP_SPOOLER_YAF_PREFIX,PATH_MAX)) == NULL)
+
+	    /* Should not change */
+	    i_psctx->yaf_separator = '_';
+	    
+	    if(i_psctx->yaf_prefix_separator == '0')
 	    {
-		return 1;
+		i_psctx->yaf_prefix_separator = '_';
 	    }
+	    else
+	    {
+		pcap_spooler_debug_print(i_psctx,(char *)
+					 "YAF prefix separator is : [%c] \n",
+					 i_psctx->yaf_prefix_separator);
+	    }
+
+	    if(i_psctx->yaf_prefix != NULL)
+	    {
+		if( (i_psctx->file_prefix = strndup(i_psctx->yaf_prefix,PATH_MAX)) == NULL)
+                {
+                    return 1;
+                }
+	    }
+	    else
+		if( (i_psctx->file_prefix = strndup(DEFAULT_PCAP_SPOOLER_YAF_PREFIX,PATH_MAX)) == NULL)
+		{
+		    return 1;
+		}
+
 	    break;
+
 
 	default:
 	    if( (i_psctx->file_prefix = strndup(DEFAULT_PCAP_SPOOLER_FILE_PREFIX,PATH_MAX)) == NULL)
@@ -805,6 +856,24 @@ static int pcap_spooler_parse_args(pcap_spooler_context *i_psctx,const DAQ_Confi
 	    }
 	}
 	
+	if (!strcmp(entry->key, "yaf_prefix"))
+        {
+	    if( (i_psctx->yaf_prefix = strndup(entry->value,PATH_MAX)) == NULL)
+            {
+                return DAQ_ERROR;
+            }
+	}
+
+	if (!strcmp(entry->key, "yaf_prefix_separator"))
+        {
+	    
+	    if((memcpy(&i_psctx->yaf_prefix_separator,entry->value,sizeof(char))) != &i_psctx->yaf_prefix_separator)
+	    {
+		return DAQ_ERROR;
+	    }
+	}
+
+
 	if (!strcmp(entry->key, "operation_mode"))
 	{
 	    char *def_mode = NULL;
@@ -872,20 +941,24 @@ static u_int32_t pcap_spooler_move_pcap(pcap_spooler_context *i_psctx)
 	    return 1;
 	}
 	
-	if( (snprintf(old_path,PATH_MAX,"%s/%s%s_%.5u.pcap",
+	if( (snprintf(old_path,PATH_MAX,"%s/%s%c%s%c%.llu.pcap",
 		      i_psctx->pcap_reference.spooler_directory,
 		      i_psctx->pcap_reference.file_prefix,
+		      i_psctx->pcap_reference.yaf_prefix_separator,
 		      yaf_timestamp_str,
+		      i_psctx->pcap_reference.yaf_separator,
 		      i_psctx->pcap_reference.serial)) < 0)
 	{
 	    return 1;
 	}
 	
-	if( (snprintf(new_path,PATH_MAX,"%s/%s%s_%.5u.pcap",
+	if( (snprintf(new_path,PATH_MAX,"%s/%s%c%s%c%.llu.pcap",
 		      i_psctx->pcap_reference.archive_directory,
 		      i_psctx->pcap_reference.file_prefix,
-		      yaf_timestamp_str,
-		      i_psctx->pcap_reference.serial)) < 0)
+                      i_psctx->pcap_reference.yaf_prefix_separator,
+                      yaf_timestamp_str,
+                      i_psctx->pcap_reference.yaf_separator,
+                      i_psctx->pcap_reference.serial)) < 0)
 	{
 	    return 1;
 	}
@@ -926,9 +999,6 @@ static u_int32_t pcap_spooler_move_pcap(pcap_spooler_context *i_psctx)
 static int pcap_spooler_directory_filter(const struct dirent *pcap_file_comp)
 {
     unsigned int pcap_file_prefix_len = 0;
-    int fnamelen = 0;
-    
-    int operation_mode = 0;
     
     if(pcap_file_comp == NULL)
     {
@@ -940,40 +1010,17 @@ static int pcap_spooler_directory_filter(const struct dirent *pcap_file_comp)
 	return 0;
     }
     
-    /* Not the cleanest way, we could use a static ...but could cause trouble */
-    if(strstr(pcap_file_comp->d_name,"yaf_") != NULL)
-    {
-	operation_mode = OPERATION_MODE_YAF;
-    }
-    else
-    {
-	operation_mode = OPERATION_MODE_PCAP;
-    }
-    
-    
     pcap_file_prefix_len = strlen(pcap_file_prefix);
-
     
-    switch(operation_mode)
+    switch(dir_filter_op_mode)
     {
     case OPERATION_MODE_YAF:
 	
-	/* Ignore lock files */
-	fnamelen = strlen(pcap_file_comp->d_name);
-	
-	if( (fnamelen <= 34) &&
-	    (fnamelen >= 29))
+	if(strncmp(pcap_file_comp->d_name,pcap_file_prefix,pcap_file_prefix_len) == 0 )
 	{
-	    if(strncmp(pcap_file_comp->d_name,"yaf_",4) == 0 )
-	    {
-		if(fnamelen <= 29)
-		{
-		if(strncmp(&pcap_file_comp->d_name[24],".pcap",5) == 0 )
-		{
-		    return 1;
-		}
-	    }
-	    }	
+	    /* Ignore lock files */
+	    if( strstr(pcap_file_comp->d_name,".lock") == NULL)
+		return 1;
 	}
 	break;
 	
@@ -1078,12 +1125,16 @@ static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx)
     unsigned long int prefix_len = 0;
     
     /* YAF */
-    unsigned long int min_serial = 0;
-    char yaf_serial_str[6] = {0};
+    unsigned long long int  min_serial = 0;
+    char yaf_serial_str[20] = {0}; /* the serial size has grown in version 2.5 should be fine for a while..*/
     char yaf_timestamp_str[15] = {0};
-	    
-    unsigned int yaf_serial = 0;
+    
+    unsigned long long int yaf_serial = 0;
     unsigned int yaf_timestamp = 0;
+
+    char *st_field_sep = NULL;
+    char *nd_field_sep = NULL;
+    char *ext_ptr = NULL;
     /* YAF */
     
     if(i_psctx == NULL)
@@ -1105,10 +1156,49 @@ static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx)
 	{
 	case OPERATION_MODE_YAF:
 	    
-	    memcpy(yaf_timestamp_str,&pcap_file_list[x]->d_name[4],14);	
-	    memcpy(yaf_serial_str,&pcap_file_list[x]->d_name[19],5);
+	    if( (st_field_sep = index(pcap_file_list[x]->d_name,i_psctx->yaf_prefix_separator)) == NULL)
+	    {
+		pcap_spooler_debug_print(i_psctx,(char *)
+					 "[%s()]: can't decode filename [%s], aborting... \n",
+					 __FUNCTION__,
+					 pcap_file_list[x]->d_name);
+		abort();
+	    }
+
 	    
-	    yaf_serial = strtoul(yaf_serial_str,NULL,10);
+	    if( (size_t)(st_field_sep - pcap_file_list[x]->d_name) > strlen(i_psctx->file_prefix))
+	    {
+		pcap_spooler_debug_print(i_psctx,(char *)
+					 "[%s()]: Distance betwen defined prefix and occurence of the first separator is to large for file [%s], aborting... \n",
+					 __FUNCTION__,
+					 pcap_file_list[x]->d_name);
+		abort();
+	    }
+
+
+	    if( (nd_field_sep = index((char *)(st_field_sep+1),i_psctx->yaf_separator)) == NULL)
+	    {
+		pcap_spooler_debug_print(i_psctx,(char *)
+					 "[%s()]: can't decode filename [%s], aborting... \n",
+					 __FUNCTION__,
+					 pcap_file_list[x]->d_name);
+		abort();
+	    }
+
+	    char ext_dot = '.';
+	    if( (ext_ptr = index((char *)(nd_field_sep+1),ext_dot)) == NULL)
+	    {
+		pcap_spooler_debug_print(i_psctx,(char *)
+					 "[%s()]: can't decode filename [%s], aborting... \n",
+					 __FUNCTION__,
+					 pcap_file_list[x]->d_name);
+		abort();
+	    }
+	    
+	    memcpy(yaf_timestamp_str,(st_field_sep+1),(nd_field_sep - (st_field_sep+1)));
+	    memcpy(yaf_serial_str,(nd_field_sep+1),((ext_ptr - 1) - nd_field_sep ));
+	    
+	    yaf_serial = strtoull(yaf_serial_str,'\0',10);
 	    
 	    if( (pcap_spooler_yaf_timestamp_to_utc(yaf_timestamp_str,(time_t *)&yaf_timestamp)))
 	    {
@@ -1297,7 +1387,6 @@ static int pcap_spooler_daq_initialize(const DAQ_Config_t * config, void **ctxt_
 	snprintf(errbuf, len, "%s: Couldn't allocate memory for the new PCAP_SPOOLER  context!", __FUNCTION__);
 	return DAQ_ERROR;
     }
-
     
     /* Parse Arguments */
     if(pcap_spooler_parse_args(ps_ctx,config,ctxt_ptr) < 0)

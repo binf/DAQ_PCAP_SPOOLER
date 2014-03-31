@@ -31,7 +31,7 @@
 /* Should we support other type of pcap out there ? */
 #define TCPDUMP_MAGIC 0xa1b2c3d4
 
-#define DAQ_PCAP_SPOOLER_VERSION 4
+#define DAQ_PCAP_SPOOLER_VERSION 5
 
 #define DAQ_PCAP_SPOOLER_CAPABILITIES  (DAQ_CAPA_UNPRIV_START|DAQ_CAPA_BPF|DAQ_CAPA_BREAKLOOP);
 
@@ -85,9 +85,11 @@ typedef struct _PcapReference
     char file_prefix[PATH_MAX];
     char spooler_directory[PATH_MAX];
     char archive_directory[PATH_MAX];
+    char yaf_separator;
+    char yaf_prefix_separator;
     u_int32_t timestamp;
     u_int32_t operation_mode; /* Check if we are re-run in the same operation mode */
-    u_int32_t serial; /* Used if running in YAF support mode */
+    unsigned long long int serial; /* Used if running in YAF support mode */
     
     off_t last_read_offset;
     ssize_t saved_size;
@@ -105,6 +107,9 @@ typedef struct _pcap_spooler_context
 
     u_int32_t block_size_read;
     char *file_prefix;
+    char *yaf_prefix;
+    char yaf_separator;
+    char yaf_prefix_separator;
     char *spooler_directory;
     char *archive_directory;
     char *pcap_reference_file;
