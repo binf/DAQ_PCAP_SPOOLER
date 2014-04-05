@@ -330,8 +330,15 @@ static u_int32_t pcap_spooler_open_pcap(pcap_spooler_context *i_psctx)
 	    return 1;
 	}
 	
-	snprintf(yaf_serial_str,20,"%.llu",i_psctx->pcap_reference.serial);
-	
+	if(i_psctx->pcap_reference.serial <= 99999)
+	{
+	    snprintf(yaf_serial_str,20,"%.05llu",i_psctx->pcap_reference.serial);
+	}
+	else
+	{
+	    snprintf(yaf_serial_str,20,"%.llu",i_psctx->pcap_reference.serial);
+	}
+
 	snprintf(i_psctx->pcap_file_temp_name,PATH_MAX,"%s/%s%c%s%c%s.pcap",
 		 i_psctx->pcap_reference.spooler_directory,
 		 i_psctx->pcap_reference.file_prefix,
@@ -1255,8 +1262,7 @@ static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx)
 	    }
 	    break;
 	}
-    
-    }        
+    }
     
     
     switch(i_psctx->operation_mode)
@@ -1336,6 +1342,9 @@ static u_int32_t pcap_spooler_monitor_directory(pcap_spooler_context *i_psctx)
     else
     {
 	/* in case its stalling for some reason */
+	pcap_spooler_debug_print(i_psctx,(char *)
+				 "[%s()]: is stalling ...\n",
+				 __FUNCTION__);
 	usleep(200);
     }
     
@@ -1585,28 +1594,30 @@ if(i_psctx->has_PCAP)
     }
     
     total_size = i_psctx->pcap_stat.st_size;
-    
-    if(i_psctx->pcap_reference.last_read_offset != 0)
+
+    if(total_size > current_offset)
     {
-	current_offset = lseek(i_psctx->pcap_fd,i_psctx->pcap_reference.last_read_offset,SEEK_SET);
-    }
-    else
-    {
-	current_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
-    }
-    
-    while(current_offset < total_size)
-    {    
-	if(pcap_spooler_read_bulk(i_psctx->pcap_fd,(void *)i_psctx->read_buffer,i_psctx->read_buffer_size,&read_size))
+	if(i_psctx->pcap_reference.last_read_offset != 0)
 	{
-	    return 1;
+	    current_offset = lseek(i_psctx->pcap_fd,i_psctx->pcap_reference.last_read_offset,SEEK_SET);
+	}
+	else
+	{
+	    current_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
 	}
 	
-	current_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
-	process_offset = 0;
-	off_read = 0;
-	
-	while(process_offset < read_size)
+	while(current_offset < total_size)
+	{    
+	    if(pcap_spooler_read_bulk(i_psctx->pcap_fd,(void *)i_psctx->read_buffer,i_psctx->read_buffer_size,&read_size))
+	    {
+		return 1;
+	    }
+	    
+	    current_offset = lseek(i_psctx->pcap_fd,0,SEEK_CUR);
+	    process_offset = 0;
+	    off_read = 0;
+	    
+	    while(process_offset < read_size)
 	    {
 		packet_filter_eval = 1;
 		pkthdrptr=(struct pcap_pkthdr *)(i_psctx->read_buffer+process_offset);
@@ -1684,39 +1695,44 @@ if(i_psctx->has_PCAP)
 		    off_read = 0;
 		}
 	    }
-	
-	if(pcap_rebuffer)
-	{
-	    pcap_rebuffer=0;
+	    
+	    if(pcap_rebuffer)
+	    {
+		pcap_rebuffer=0;
 		
-	    last_processed_offset = current_offset - (read_size -  process_offset);
-	    
-	    if( (i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,last_processed_offset,SEEK_SET)) < 0)
-	    {
-		return 1;
+		last_processed_offset = current_offset - (read_size -  process_offset);
+		
+		if( (i_psctx->pcap_reference.last_read_offset = lseek(i_psctx->pcap_fd,last_processed_offset,SEEK_SET)) < 0)
+		{
+		    return 1;
+		}
+		
+		if( (pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat)))
+		{
+		    return 1;
+		}
+		
+		i_psctx->pcap_reference.last_read_offset = last_processed_offset;
+		i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
+		
+		
+		if( (pcap_spooler_write_pcap_reference(i_psctx)))
+		{
+		    /* XXX */
+		    return 1;
+		}
+		
+		current_offset = i_psctx->pcap_reference.last_read_offset;
+		usleep(20);
 	    }
 	    
-	    if( (pcap_spooler_get_stat(i_psctx->pcap_fd,&i_psctx->pcap_stat)))
-	    {
-		return 1;
-	    }
-	    
-	    i_psctx->pcap_reference.last_read_offset = last_processed_offset;
-	    i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
-	    
-	    
-	    if( (pcap_spooler_write_pcap_reference(i_psctx)))
-	    {
-		/* XXX */
-		return 1;
-	    }
-	    
-	    current_offset = i_psctx->pcap_reference.last_read_offset;
-	    usleep(20);
+	    memset(i_psctx->read_buffer,'\0',i_psctx->read_buffer_size);
 	}
-	
-	memset(i_psctx->read_buffer,'\0',i_psctx->read_buffer_size);
     }
+}
+else
+{
+    usleep(20);
 }
 
 
@@ -1738,7 +1754,7 @@ if( (i_psctx->has_PCAP))
     {
 	i_psctx->read_packet=0;
 	i_psctx->pcap_reference.saved_size = i_psctx->pcap_stat.st_size;
-	
+		
 	if( (pcap_spooler_write_pcap_reference(i_psctx)))
 	{
 	    /* XXX */
